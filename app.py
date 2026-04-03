@@ -63,19 +63,19 @@ DEFAULT_INPUTS = {
     "activo": "C/ Los Cincuenta 3, Alicante",
     "referencia_catastral": "7653302YH1475D0001AL",
     "parcela_m2": 311.0,
-    "sup_construida_sr_m2": 1210.0,     # sobre rasante
+    "sup_construida_sr_m2": 1000.0,     # sobre rasante
     "sup_construida_br_m2": 260.0,      # bajo rasante
-    "sup_vendible_m2": 1210.0,          # útil comercial / vendible asumida
-    "pem": 1_475_000.0,
+    "sup_vendible_m2": 1000.0,          # útil comercial / vendible asumida
+    "pem": 1_450_000.0,
     "precio_suelo": 315_000.0,
     "iva_compra_suelo_pct": 0.21,
     "ajd_pct": 0.015,
-    "precio_vivienda": 245_000.0,
+    "precio_vivienda": 260_000.0,
     "num_viviendas": 11,
     "precio_garaje": 25_000.0,
-    "num_garajes": 10,
+    "num_garajes": 0,
     "precio_trastero": 3_500.0,
-    "num_trasteros": 10,
+    "num_trasteros": 0,
 }
 BASE_PEM = DEFAULT_INPUTS["pem"]
 
@@ -105,25 +105,25 @@ SCENARIOS = {
 PROGRAM_PRESETS = {
     "10 viviendas": {
         "num_viviendas": 10,
-        "num_garajes": 10,
-        "num_trasteros": 10,
-        "precio_vivienda": 245_000.0,
+        "num_garajes": 0,
+        "num_trasteros": 0,
+        "precio_vivienda": 260_000.0,
         "precio_garaje": 25_000.0,
         "precio_trastero": 3_500.0,
-        "sup_construida_sr_m2": 1160.0,
+        "sup_construida_sr_m2": 1000.0,
         "sup_construida_br_m2": 260.0,
-        "sup_vendible_m2": 1160.0,
+        "sup_vendible_m2": 1000.0,
     },
     "11 viviendas": {
         "num_viviendas": 11,
-        "num_garajes": 10,
-        "num_trasteros": 10,
-        "precio_vivienda": 245_000.0,
+        "num_garajes": 0,
+        "num_trasteros": 0,
+        "precio_vivienda": 260_000.0,
         "precio_garaje": 25_000.0,
         "precio_trastero": 3_500.0,
-        "sup_construida_sr_m2": 1210.0,
+        "sup_construida_sr_m2": 1000.0,
         "sup_construida_br_m2": 260.0,
-        "sup_vendible_m2": 1210.0,
+        "sup_vendible_m2": 1000.0,
     },
 }
 
