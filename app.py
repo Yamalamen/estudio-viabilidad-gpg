@@ -215,16 +215,25 @@ PEM_SENSITIVE_CONCEPTS = {
 }
 
 def eur(v: float) -> str:
-    return f"€{v:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{safe_float(v):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def pct(v: float) -> str:
     return f"{v * 100:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def eur_m2(v: float) -> str:
-    return f"€{v:,.0f}/m²".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{safe_float(v):,.2f} €/m²".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def ratio(v: float) -> str:
-    return f"{v:,.2f}x".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{safe_float(v):,.2f}x".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def pct_display_from_ratio(v: float) -> str:
+    return f"{safe_float(v) * 100:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def decimal_to_percent_value(v: float) -> float:
+    return safe_float(v) * 100.0
+
+def percent_to_decimal_value(v: float) -> float:
+    return safe_float(v) / 100.0
 
 def safe_float(value, default: float = 0.0) -> float:
     try:
@@ -719,9 +728,12 @@ with tab2:
             st.session_state["reset_counter"] += 1
             st.rerun()
     with right:
-        st.caption("Los importes de esta tabla recalculan su % del PEM automáticamente. Si cambias el PEM, el importe y el % se sincronizan. La columna Bucket se ha eliminado.")
+        st.caption("Los importes de esta tabla recalculan su % del PEM automáticamente. La columna % PEM se muestra en formato porcentaje real, por ejemplo 2,35. Si cambias el PEM, el importe y el % se sincronizan. La columna Bucket se ha eliminado.")
+    editor_display_df = synced_editor_source.copy()
+    editor_display_df["% PEM"] = editor_display_df["% PEM"].apply(decimal_to_percent_value)
+
     editor_df = st.data_editor(
-        synced_editor_source.copy(),
+        editor_display_df,
         key=f"editable_costs_editor_{st.session_state['reset_counter']}",
         hide_index=True,
         width="stretch",
@@ -732,12 +744,13 @@ with tab2:
             "Hito": st.column_config.TextColumn("Hito"),
             "Concepto": st.column_config.TextColumn("Concepto"),
             "Coste editable (€)": st.column_config.NumberColumn("Coste editable (€)", min_value=0.0, step=500.0, format="%.2f"),
-            "% PEM": st.column_config.NumberColumn("% PEM", min_value=0.0, step=0.0005, format="%.4f"),
+            "% PEM": st.column_config.NumberColumn("% PEM", min_value=0.0, step=0.01, format="%.2f"),
             "Observaciones": st.column_config.TextColumn("Observaciones"),
             "Auto": st.column_config.CheckboxColumn("Auto"),
         },
         column_order=["Fase", "Hito", "Concepto", "Coste editable (€)", "% PEM", "Observaciones", "Auto"],
     )
+    editor_df["% PEM"] = editor_df["% PEM"].apply(percent_to_decimal_value)
     st.session_state["editable_costs_store"] = reconcile_cost_editor_changes(synced_editor_source, editor_df, inputs["pem"])
     st.metric("Total costes editables base", eur(float(st.session_state["editable_costs_store"]["Coste editable (€)"].sum())))
 
@@ -791,7 +804,7 @@ with tab3:
     if not contabilidad_resumen_df.empty:
         conta_show = contabilidad_resumen_df.copy()
         conta_show["Importe (€)"] = conta_show["Importe (€)"].map(eur)
-        conta_show["% PEM"] = conta_show["% PEM"].map(pct)
+        conta_show["% PEM"] = conta_show["% PEM"].map(pct_display_from_ratio)
         st.dataframe(display_df(conta_show), width="stretch", hide_index=True)
 
 editable_cost_df = sync_cost_rows_with_pem(st.session_state["editable_costs_store"], inputs["pem"])
@@ -875,11 +888,11 @@ with tab5:
     ], columns=["Concepto", "Importe (€)", "% PEM"])
     ingresos_show = ingresos_df.copy()
     ingresos_show["Importe (€)"] = ingresos_show["Importe (€)"].map(eur)
-    ingresos_show["% PEM"] = ingresos_show["% PEM"].map(pct)
+    ingresos_show["% PEM"] = ingresos_show["% PEM"].map(pct_display_from_ratio)
     st.dataframe(display_df(ingresos_show), width="stretch", hide_index=True)
     costes_show = model["costes_df"][["Fase", "Hito", "Concepto", "Coste (€)", "% PEM", "Observaciones"]].copy()
     costes_show["Coste (€)"] = costes_show["Coste (€)"].map(eur)
-    costes_show["% PEM"] = costes_show["% PEM"].map(pct)
+    costes_show["% PEM"] = costes_show["% PEM"].map(pct_display_from_ratio)
     st.subheader("Costes consolidados")
     st.dataframe(display_df(costes_show), width="stretch", hide_index=True)
 
