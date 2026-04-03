@@ -223,8 +223,33 @@ def pct(v: float) -> str:
 def eur_m2(v: float) -> str:
     return f"{safe_float(v):,.2f} €/m²".replace(",", "X").replace(".", ",").replace("X", ".")
 
+
 def ratio(v: float) -> str:
     return f"{safe_float(v):,.2f}x".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def fmt_es_number(v: float, decimals: int = 2) -> str:
+    return f"{safe_float(v):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def fmt_es_currency(v: float) -> str:
+    return fmt_es_number(v, 2)
+
+def fmt_es_percent_from_ratio(v: float) -> str:
+    return fmt_es_number(safe_float(v) * 100.0, 2)
+
+def parse_es_number(value, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s:
+        return default
+    s = s.replace("€", "").replace("%", "").replace("/m²", "").replace("m²", "").strip()
+    s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return default
 
 def pct_display_from_ratio(v: float) -> str:
     return f"{safe_float(v) * 100:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -728,9 +753,11 @@ with tab2:
             st.session_state["reset_counter"] += 1
             st.rerun()
     with right:
-        st.caption("Los importes de esta tabla recalculan su % del PEM automáticamente. La columna % PEM se muestra en formato porcentaje real, por ejemplo 2,35. Si cambias el PEM, el importe y el % se sincronizan. La columna Bucket se ha eliminado.")
+        st.caption("Los importes y el % PEM se muestran en formato español real. Ejemplo: 10.955,49 y 2,35. La columna Bucket se ha eliminado.")
+
     editor_display_df = synced_editor_source.copy()
-    editor_display_df["% PEM"] = editor_display_df["% PEM"].apply(decimal_to_percent_value)
+    editor_display_df["Coste editable (€)"] = editor_display_df["Coste editable (€)"].apply(fmt_es_currency)
+    editor_display_df["% PEM"] = editor_display_df["% PEM"].apply(fmt_es_percent_from_ratio)
 
     editor_df = st.data_editor(
         editor_display_df,
@@ -743,14 +770,17 @@ with tab2:
             "Fase": st.column_config.TextColumn("Fase"),
             "Hito": st.column_config.TextColumn("Hito"),
             "Concepto": st.column_config.TextColumn("Concepto"),
-            "Coste editable (€)": st.column_config.NumberColumn("Coste editable (€)", min_value=0.0, step=500.0, format="%.2f"),
-            "% PEM": st.column_config.NumberColumn("% PEM", min_value=0.0, step=0.01, format="%.2f"),
+            "Coste editable (€)": st.column_config.TextColumn("Coste editable (€)", help="Formato: 10.955,49"),
+            "% PEM": st.column_config.TextColumn("% PEM", help="Formato: 2,35"),
             "Observaciones": st.column_config.TextColumn("Observaciones"),
             "Auto": st.column_config.CheckboxColumn("Auto"),
         },
         column_order=["Fase", "Hito", "Concepto", "Coste editable (€)", "% PEM", "Observaciones", "Auto"],
     )
-    editor_df["% PEM"] = editor_df["% PEM"].apply(percent_to_decimal_value)
+
+    editor_df["Coste editable (€)"] = editor_df["Coste editable (€)"].apply(parse_es_number)
+    editor_df["% PEM"] = editor_df["% PEM"].apply(lambda x: parse_es_number(x) / 100.0)
+
     st.session_state["editable_costs_store"] = reconcile_cost_editor_changes(synced_editor_source, editor_df, inputs["pem"])
     st.metric("Total costes editables base", eur(float(st.session_state["editable_costs_store"]["Coste editable (€)"].sum())))
 
