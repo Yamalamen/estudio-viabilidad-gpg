@@ -412,12 +412,14 @@ def build_inputs() -> dict:
     parcela_m2 = st.sidebar.number_input("Parcela catastral (m²)", min_value=0.0, value=float(DEFAULT_INPUTS["parcela_m2"]), step=1.0)
 
     st.sidebar.subheader("Superficies y PEM")
-    sotanos = st.sidebar.selectbox("Nº de sótanos", [1, 2], index=max(int(DEFAULT_INPUTS.get("sotanos", 1)) - 1, 0))
-    sup_construida_sr_m2 = st.sidebar.number_input("m² construidos sobre rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_sr_m2", DEFAULT_INPUTS["sup_construida_sr_m2"])), step=10.0)
+    sotanos = st.sidebar.selectbox("Nº de sótanos", [1, 2], index=max(int(st.session_state.get("sotanos", DEFAULT_INPUTS.get("sotanos", 1))) - 1, 0), key="sotanos")
+    sup_construida_sr_m2 = st.sidebar.number_input("m² construidos sobre rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_sr_m2", DEFAULT_INPUTS["sup_construida_sr_m2"])), step=10.0, key="sup_construida_sr_m2")
     base_br_por_sotano = float(DEFAULT_INPUTS["sup_construida_br_m2"])
-    sup_construida_br_m2 = base_br_por_sotano * sotanos
-    st.sidebar.metric("m² construidos bajo rasante", fmt_es_number(sup_construida_br_m2, 2))
-    sup_vendible_m2 = st.sidebar.number_input("m² vendibles", min_value=0.0, value=float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])), step=10.0)
+    sup_construida_br_default = float(st.session_state.get(f"sup_construida_br_m2_{sotanos}", base_br_por_sotano * sotanos))
+    sup_construida_br_m2 = st.sidebar.number_input("m² construidos bajo rasante", min_value=0.0, value=sup_construida_br_default, step=10.0, key=f"sup_construida_br_input_{sotanos}")
+    st.session_state[f"sup_construida_br_m2_{sotanos}"] = float(sup_construida_br_m2)
+    st.session_state["sup_construida_br_m2"] = float(sup_construida_br_m2)
+    sup_vendible_m2 = st.sidebar.number_input("m² vendibles", min_value=0.0, value=float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])), step=10.0, key="sup_vendible_m2")
     coste_construccion_m2 = st.sidebar.number_input("Coste construcción por m² (€)", min_value=0.0, value=float(st.session_state.get("coste_construccion_m2", DEFAULT_INPUTS["coste_construccion_m2"])), step=10.0)
     sup_construida_total_m2 = sup_construida_sr_m2 + sup_construida_br_m2
     pem = coste_construccion_m2 * sup_construida_total_m2
