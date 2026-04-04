@@ -67,20 +67,23 @@ DEFAULT_INPUTS = {
     "sup_construida_sr_m2": 1000.0,
     "sup_construida_br_m2": 260.0,
     "sup_vendible_m2": 1000.0,
-    "pem": 1_450_000.0,
-    "coste_construccion_m2": 1_150.79,
+    "coste_construccion_sr_m2": 1175.79,
+    "coste_construccion_br_m2": 825.0,
+    "pct_circulacion_br": 0.30,
+    "m2_por_plaza_garaje": 28.0,
+    "m2_por_trastero": 6.0,
+    "ratio_trasteros_sobre_garajes": 1.0,
     "sotanos": 1,
-    "garajes_por_sotano": 10,
-    "trasteros_por_sotano": 10,
+    "pem": 1_389_540.0,
     "precio_suelo": 315_000.0,
     "iva_compra_suelo_pct": 0.21,
     "ajd_pct": 0.015,
     "precio_vivienda": 260_000.0,
     "num_viviendas": 11,
     "precio_garaje": 25_000.0,
-    "num_garajes": 0,
+    "num_garajes": 6,
     "precio_trastero": 3_500.0,
-    "num_trasteros": 0,
+    "num_trasteros": 6,
 }
 BASE_PEM = DEFAULT_INPUTS["pem"]
 
@@ -156,7 +159,7 @@ COST_ITEMS = [
     {"fase": "Fase 4 · Financiación de la promoción", "hito": "Durante obra", "concepto": "Intereses", "base": 137500.0, "obs": "Muy sensible al banco/plazo", "auto": False},
     {"fase": "Fase 4 · Financiación de la promoción", "hito": "Durante obra", "concepto": "Otras comisiones bancarias", "base": 5000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Construcción sobre rasante", "base": 1210000.0, "obs": "", "auto": False},
-    {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Sótanos (10 plazas + 10 trasteros por sótano)", "base": 260000.0, "obs": "Opción base recomendada", "auto": False},
+    {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "1 sótano (10 plazas + 10 trasteros)", "base": 260000.0, "obs": "Opción base recomendada", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Ascensor", "base": 35000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Durante obra", "concepto": "Acometidas definitivas", "base": 25000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Durante obra", "concepto": "Urbanización interior / remates", "base": 32500.0, "obs": "", "auto": False},
@@ -187,7 +190,7 @@ RISK_ITEMS = [
 ]
 
 PEM_SENSITIVE_CONCEPTS = {
-    "ICIO","Construcción sobre rasante","Sótanos (10 plazas + 10 trasteros por sótano)","Ascensor","Acometidas definitivas",
+    "ICIO","Construcción sobre rasante","1 sótano (10 plazas + 10 trasteros)","Ascensor","Acometidas definitivas",
     "Urbanización interior / remates","Medios auxiliares / grúa / casetas","Seguridad y salud ejecución",
     "Residuos de obra","Imprevistos / modificados","Proyecto básico","Proyecto ejecución","Dirección de obra",
     "Dirección de ejecución","CSS","Estudios técnicos complementarios","Laboratorio / control calidad","OCT",
@@ -400,7 +403,6 @@ def pem_scaled_cost(concepto: str, coste_base: float, pem: float) -> float:
         return coste_base * (pem / BASE_PEM)
     return coste_base
 
-
 def build_inputs() -> dict:
     st.sidebar.header("Control del modelo")
     escenario = st.sidebar.selectbox("Escenario", list(SCENARIOS.keys()), index=0)
@@ -411,19 +413,35 @@ def build_inputs() -> dict:
     rc = st.sidebar.text_input("Referencia catastral", DEFAULT_INPUTS["referencia_catastral"])
     parcela_m2 = st.sidebar.number_input("Parcela catastral (m²)", min_value=0.0, value=float(DEFAULT_INPUTS["parcela_m2"]), step=1.0)
 
-    st.sidebar.subheader("Superficies y PEM")
-    sotanos = st.sidebar.selectbox("Nº de sótanos", [1, 2], index=max(int(st.session_state.get("sotanos", DEFAULT_INPUTS.get("sotanos", 1))) - 1, 0), key="sotanos")
-    sup_construida_sr_m2 = st.sidebar.number_input("m² construidos sobre rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_sr_m2", DEFAULT_INPUTS["sup_construida_sr_m2"])), step=10.0, key="sup_construida_sr_m2")
-    base_br_por_sotano = float(DEFAULT_INPUTS["sup_construida_br_m2"])
-    sup_construida_br_default = float(st.session_state.get(f"sup_construida_br_m2_{sotanos}", base_br_por_sotano * sotanos))
-    sup_construida_br_m2 = st.sidebar.number_input("m² construidos bajo rasante", min_value=0.0, value=sup_construida_br_default, step=10.0, key=f"sup_construida_br_input_{sotanos}")
-    st.session_state[f"sup_construida_br_m2_{sotanos}"] = float(sup_construida_br_m2)
-    st.session_state["sup_construida_br_m2"] = float(sup_construida_br_m2)
-    sup_vendible_m2 = st.sidebar.number_input("m² vendibles", min_value=0.0, value=float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])), step=10.0, key="sup_vendible_m2")
-    coste_construccion_m2 = st.sidebar.number_input("Coste construcción por m² (€)", min_value=0.0, value=float(st.session_state.get("coste_construccion_m2", DEFAULT_INPUTS["coste_construccion_m2"])), step=10.0)
-    sup_construida_total_m2 = sup_construida_sr_m2 + sup_construida_br_m2
-    pem = coste_construccion_m2 * sup_construida_total_m2
+    st.sidebar.subheader("Superficies y sótanos")
+    num_viviendas = 11
+    st.sidebar.metric("Viviendas", num_viviendas)
+    sotanos = st.sidebar.selectbox("Nº de sótanos", [1, 2], index=max(min(int(DEFAULT_INPUTS.get("sotanos", 1)) - 1, 1), 0))
+    sup_construida_sr_m2 = st.sidebar.number_input("m² construidos sobre rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_sr_m2", DEFAULT_INPUTS["sup_construida_sr_m2"])), step=10.0)
+    sup_construida_br_m2 = st.sidebar.number_input("m² construidos bajo rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_br_m2", DEFAULT_INPUTS["sup_construida_br_m2"])), step=10.0)
+    sup_vendible_m2 = st.sidebar.number_input("m² vendibles", min_value=0.0, value=float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])), step=10.0)
+
+    st.sidebar.subheader("Modelo de sótano")
+    coste_construccion_sr_m2 = st.sidebar.number_input("Coste construcción sobre rasante (€/m²)", min_value=0.0, value=float(st.session_state.get("coste_construccion_sr_m2", DEFAULT_INPUTS["coste_construccion_sr_m2"])), step=10.0)
+    coste_construccion_br_m2 = st.sidebar.number_input("Coste construcción bajo rasante (€/m²)", min_value=0.0, value=float(st.session_state.get("coste_construccion_br_m2", DEFAULT_INPUTS["coste_construccion_br_m2"])), step=10.0)
+    pct_circulacion_br = st.sidebar.number_input("Circulación / maniobra sótano (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("pct_circulacion_br", DEFAULT_INPUTS["pct_circulacion_br"])) * 100.0, step=1.0) / 100.0
+    m2_por_plaza_garaje = st.sidebar.number_input("m² por plaza de garaje", min_value=1.0, value=float(st.session_state.get("m2_por_plaza_garaje", DEFAULT_INPUTS["m2_por_plaza_garaje"])), step=1.0)
+    m2_por_trastero = st.sidebar.number_input("m² por trastero", min_value=1.0, value=float(st.session_state.get("m2_por_trastero", DEFAULT_INPUTS["m2_por_trastero"])), step=1.0)
+    ratio_trasteros_sobre_garajes = st.sidebar.number_input("Ratio trasteros / plazas", min_value=0.0, max_value=2.0, value=float(st.session_state.get("ratio_trasteros_sobre_garajes", DEFAULT_INPUTS["ratio_trasteros_sobre_garajes"])), step=0.1)
+
+    sup_util_br_m2 = max(sup_construida_br_m2 * (1.0 - pct_circulacion_br), 0.0)
+    num_garajes = max(int(sup_util_br_m2 // m2_por_plaza_garaje), 0) if m2_por_plaza_garaje else 0
+    num_trasteros = max(int(num_garajes * ratio_trasteros_sobre_garajes), 0)
+    capacidad_trasteros = max(int(sup_util_br_m2 // m2_por_trastero), 0) if m2_por_trastero else 0
+    num_trasteros = min(num_trasteros, capacidad_trasteros)
+
+    pem_sr = sup_construida_sr_m2 * coste_construccion_sr_m2
+    pem_br = sup_construida_br_m2 * coste_construccion_br_m2
+    pem = pem_sr + pem_br
+
     st.sidebar.metric("PEM calculado automáticamente", eur(pem))
+    st.sidebar.metric("Garajes estimados", int(num_garajes))
+    st.sidebar.metric("Trasteros estimados", int(num_trasteros))
 
     st.sidebar.subheader("Inputs económicos")
     precio_suelo = st.sidebar.number_input("Precio suelo (€)", min_value=0.0, value=float(DEFAULT_INPUTS["precio_suelo"]), step=5_000.0)
@@ -431,14 +449,6 @@ def build_inputs() -> dict:
     ajd = st.sidebar.number_input("AJD compra (%)", min_value=0.0, max_value=100.0, value=DEFAULT_INPUTS["ajd_pct"] * 100, step=0.1) / 100
 
     st.sidebar.subheader("Programa de ventas")
-    num_viviendas = 11
-    garajes_por_sotano = int(DEFAULT_INPUTS.get("garajes_por_sotano", 10))
-    trasteros_por_sotano = int(DEFAULT_INPUTS.get("trasteros_por_sotano", 10))
-    num_garajes = sotanos * garajes_por_sotano
-    num_trasteros = sotanos * trasteros_por_sotano
-    st.sidebar.metric("Viviendas", num_viviendas)
-    st.sidebar.metric("Garajes totales", num_garajes)
-    st.sidebar.metric("Trasteros totales", num_trasteros)
     precio_vivienda = st.sidebar.number_input("Precio vivienda (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_vivienda", DEFAULT_INPUTS["precio_vivienda"])), step=5_000.0)
     precio_garaje = st.sidebar.number_input("Precio garaje (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_garaje", DEFAULT_INPUTS["precio_garaje"])), step=1_000.0)
     precio_trastero = st.sidebar.number_input("Precio trastero (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_trastero", DEFAULT_INPUTS["precio_trastero"])), step=500.0)
@@ -451,20 +461,28 @@ def build_inputs() -> dict:
     sobrecoste_pct = st.sidebar.number_input("Sobrecoste costes obra (%)", min_value=0.0, max_value=100.0, value=active["sobrecoste_pct"] * 100, step=0.5) / 100
     caida_precios_pct = st.sidebar.number_input("Caída precio ventas (%)", min_value=0.0, max_value=100.0, value=active["caida_precios_pct"] * 100, step=0.5) / 100
     interes_anual_pct = st.sidebar.number_input("Interés anual préstamo (%)", min_value=0.0, max_value=100.0, value=active["interes_anual_pct"] * 100, step=0.25) / 100
+
     return {
+        "program_preset": "11 viviendas · sótanos y parking automáticos",
         "escenario": escenario,
         "activo": activo,
         "referencia_catastral": rc,
         "parcela_m2": parcela_m2,
         "sotanos": sotanos,
-        "garajes_por_sotano": garajes_por_sotano,
-        "trasteros_por_sotano": trasteros_por_sotano,
         "sup_construida_sr_m2": sup_construida_sr_m2,
         "sup_construida_br_m2": sup_construida_br_m2,
-        "sup_construida_total_m2": sup_construida_total_m2,
+        "sup_util_br_m2": sup_util_br_m2,
+        "sup_construida_total_m2": sup_construida_sr_m2 + sup_construida_br_m2,
         "sup_vendible_m2": sup_vendible_m2,
-        "coste_construccion_m2": coste_construccion_m2,
+        "coste_construccion_sr_m2": coste_construccion_sr_m2,
+        "coste_construccion_br_m2": coste_construccion_br_m2,
+        "pct_circulacion_br": pct_circulacion_br,
+        "m2_por_plaza_garaje": m2_por_plaza_garaje,
+        "m2_por_trastero": m2_por_trastero,
+        "ratio_trasteros_sobre_garajes": ratio_trasteros_sobre_garajes,
         "pem": pem,
+        "pem_sr": pem_sr,
+        "pem_br": pem_br,
         "precio_suelo": precio_suelo,
         "iva_compra": iva_compra,
         "ajd": ajd,
@@ -483,6 +501,7 @@ def build_inputs() -> dict:
         "caida_precios_pct": caida_precios_pct,
         "interes_anual_pct": interes_anual_pct,
     }
+
 def build_cost_df(inputs: dict, edited_df: pd.DataFrame) -> pd.DataFrame:
     df = ensure_cost_editor_columns(edited_df, inputs["pem"]).copy()
     if inputs["pem"] > 0:
@@ -508,8 +527,9 @@ def build_cost_df(inputs: dict, edited_df: pd.DataFrame) -> pd.DataFrame:
 
     override("IVA compra suelo", iva_compra_suelo)
     override("AJD compra suelo", ajd_compra_suelo)
-    override("Construcción sobre rasante", inputs["coste_construccion_m2"] * inputs["sup_construida_sr_m2"])
-    override("Sótanos (10 plazas + 10 trasteros por sótano)", inputs["coste_construccion_m2"] * inputs["sup_construida_br_m2"])
+    override("Construcción sobre rasante", inputs.get("pem_sr", 0.0))
+    if (df["Concepto"].eq("1 sótano (10 plazas + 10 trasteros)")).any():
+        override("1 sótano (10 plazas + 10 trasteros)", inputs.get("pem_br", 0.0))
 
     pagos_suelo = ["Primer pago suelo", "Pago aplazado suelo", "Pago adicional obligado", "Resto precio suelo"]
     suelo_actual = df.loc[df["Concepto"].isin(pagos_suelo), "Coste (€)"].sum()
@@ -540,7 +560,7 @@ def compute_model(inputs: dict, edited_df: pd.DataFrame) -> dict:
     margen_bruto = ingresos_totales - coste_total_sin_iva_compra
     margen_sobre_ventas = margen_bruto / ingresos_totales if ingresos_totales else 0.0
     coste_construccion_sr = float(costes_df.loc[costes_df["Concepto"] == "Construcción sobre rasante", "Coste (€)"].sum())
-    coste_construccion_br = float(costes_df.loc[costes_df["Concepto"] == "Sótanos (10 plazas + 10 trasteros por sótano)", "Coste (€)"].sum())
+    coste_construccion_br = inputs.get("pem_br", float(costes_df.loc[costes_df["Concepto"] == "1 sótano (10 plazas + 10 trasteros)", "Coste (€)"].sum()))
     coste_construccion_total = coste_construccion_sr + coste_construccion_br
     coste_financiacion = float(costes_df.loc[costes_df["Fase"] == "Fase 4 · Financiación de la promoción", "Coste (€)"].sum())
     coste_contabilidad_adicional = float(costes_df.loc[costes_df["Bucket"] == "otros", "Coste (€)"].sum())
@@ -576,6 +596,9 @@ def compute_model(inputs: dict, edited_df: pd.DataFrame) -> dict:
         "coste_construccion_sr": coste_construccion_sr,
         "coste_construccion_br": coste_construccion_br,
         "coste_construccion_total": coste_construccion_total,
+        "sup_util_br_m2": inputs.get("sup_util_br_m2", 0.0),
+        "plazas_estimadas": inputs.get("num_garajes", 0),
+        "trasteros_estimados": inputs.get("num_trasteros", 0),
         "precio_m2_construccion_sr": precio_m2_construccion_sr,
         "precio_m2_construccion_br": precio_m2_construccion_br,
         "precio_m2_construccion_total": precio_m2_construccion_total,
@@ -861,7 +884,7 @@ with tab1:
     row2[2].metric("€ / m² venta vendible", eur_m2(model["precio_m2_venta_vendible"]))
     row2[3].metric("€ / m² margen vendible", eur_m2(model["margen_m2_vendible"]))
     row2[4].metric("Riesgo global", global_risk)
-    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["Coste construcción por m²", eur_m2(inputs["coste_construccion_m2"])],["PEM calculado", eur(inputs["pem"])],["Nº sótanos", str(inputs["sotanos"])],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes venta 4 viviendas", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
+    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["PEM calculado", eur(inputs["pem"])],["Programa", inputs["program_preset"]],["Sótanos", str(inputs["sotanos"])],["Garajes estimados", str(inputs["num_garajes"])],["Trasteros estimados", str(inputs["num_trasteros"])],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes venta 4 viviendas", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
     st.dataframe(display_df(ficha), width="stretch", hide_index=True)
     st.subheader("Dictamen automático")
     if dictamen_titulo == "Viable":
@@ -880,6 +903,9 @@ with tab4:
     ratios_m2 = pd.DataFrame([
         ["m² construidos sobre rasante", f'{inputs["sup_construida_sr_m2"]:,.0f} m²'.replace(",", ".")],
         ["m² construidos bajo rasante", f'{inputs["sup_construida_br_m2"]:,.0f} m²'.replace(",", ".")],
+        ["m² útiles sótano tras circulación", f'{inputs["sup_util_br_m2"]:,.0f} m²'.replace(",", ".")],
+        ["Garajes estimados", str(inputs["num_garajes"])],
+        ["Trasteros estimados", str(inputs["num_trasteros"])],
         ["m² construidos totales", f'{inputs["sup_construida_total_m2"]:,.0f} m²'.replace(",", ".")],
         ["m² vendibles", f'{inputs["sup_vendible_m2"]:,.0f} m²'.replace(",", ".")],
         ["Precio m² construcción sobre rasante", eur_m2(model["precio_m2_construccion_sr"])],
