@@ -68,7 +68,10 @@ DEFAULT_INPUTS = {
     "sup_construida_br_m2": 260.0,
     "sup_vendible_m2": 1000.0,
     "pem": 1_450_000.0,
-    "coste_construccion_m2": 1450000.0 / (1000.0 + 260.0),
+    "coste_construccion_m2": 1_150.79,
+    "sotanos": 1,
+    "garajes_por_sotano": 10,
+    "trasteros_por_sotano": 10,
     "precio_suelo": 315_000.0,
     "iva_compra_suelo_pct": 0.21,
     "ajd_pct": 0.015,
@@ -78,37 +81,8 @@ DEFAULT_INPUTS = {
     "num_garajes": 0,
     "precio_trastero": 3_500.0,
     "num_trasteros": 0,
-    "sotanos": 1,
-    "garajes_por_sotano": 10,
-    "trasteros_por_sotano": 10,
 }
 BASE_PEM = DEFAULT_INPUTS["pem"]
-BASE_SUP_CONSTRUIDA_BR = DEFAULT_INPUTS["sup_construida_br_m2"]
-
-PROGRAM_PRESETS = {
-    "11 viviendas": {
-        "num_viviendas": 11,
-        "num_garajes": 0,
-        "num_trasteros": 0,
-        "precio_vivienda": 260_000.0,
-        "precio_garaje": 25_000.0,
-        "precio_trastero": 3_500.0,
-        "sup_construida_sr_m2": 1000.0,
-        "sup_construida_br_m2": 260.0,
-        "sup_vendible_m2": 1000.0,
-    },
-    "10 viviendas": {
-        "num_viviendas": 10,
-        "num_garajes": 0,
-        "num_trasteros": 0,
-        "precio_vivienda": 260_000.0,
-        "precio_garaje": 25_000.0,
-        "precio_trastero": 3_500.0,
-        "sup_construida_sr_m2": 1000.0,
-        "sup_construida_br_m2": 260.0,
-        "sup_vendible_m2": 1000.0,
-    },
-}
 
 SCENARIOS = {
     "Base": {
@@ -182,7 +156,7 @@ COST_ITEMS = [
     {"fase": "Fase 4 · Financiación de la promoción", "hito": "Durante obra", "concepto": "Intereses", "base": 137500.0, "obs": "Muy sensible al banco/plazo", "auto": False},
     {"fase": "Fase 4 · Financiación de la promoción", "hito": "Durante obra", "concepto": "Otras comisiones bancarias", "base": 5000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Construcción sobre rasante", "base": 1210000.0, "obs": "", "auto": False},
-    {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Construcción bajo rasante", "base": 260000.0, "obs": "Opción base recomendada", "auto": False},
+    {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Sótanos (10 plazas + 10 trasteros por sótano)", "base": 260000.0, "obs": "Opción base recomendada", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Inicio obra", "concepto": "Ascensor", "base": 35000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Durante obra", "concepto": "Acometidas definitivas", "base": 25000.0, "obs": "", "auto": False},
     {"fase": "Fase 5 · Ejecución de obra", "hito": "Durante obra", "concepto": "Urbanización interior / remates", "base": 32500.0, "obs": "", "auto": False},
@@ -213,7 +187,7 @@ RISK_ITEMS = [
 ]
 
 PEM_SENSITIVE_CONCEPTS = {
-    "ICIO","Construcción sobre rasante","Construcción bajo rasante","Ascensor","Acometidas definitivas",
+    "ICIO","Construcción sobre rasante","Sótanos (10 plazas + 10 trasteros por sótano)","Ascensor","Acometidas definitivas",
     "Urbanización interior / remates","Medios auxiliares / grúa / casetas","Seguridad y salud ejecución",
     "Residuos de obra","Imprevistos / modificados","Proyecto básico","Proyecto ejecución","Dirección de obra",
     "Dirección de ejecución","CSS","Estudios técnicos complementarios","Laboratorio / control calidad","OCT",
@@ -344,220 +318,11 @@ def parse_month_from_date(value: str) -> int | None:
     except Exception:
         return None
 
-
-def empty_risk_df() -> pd.DataFrame:
-    return pd.DataFrame(RISK_ITEMS)
-
-def normalise_risk_df(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    defaults = {"categoria":"", "estado":"", "puntos":0, "comentario":""}
-    for col, default in defaults.items():
-        if col not in out.columns:
-            out[col] = default
-    out["categoria"] = out["categoria"].fillna("").astype(str)
-    out["estado"] = out["estado"].fillna("").astype(str)
-    out["comentario"] = out["comentario"].fillna("").astype(str)
-    out["puntos"] = pd.to_numeric(out["puntos"], errors="coerce").fillna(0).clip(lower=0, upper=3).astype(int)
-    return out[["categoria", "estado", "puntos", "comentario"]]
-
-MASTER_INPUT_LABELS = {
-    "activo": "Activo",
-    "referencia_catastral": "Referencia catastral",
-    "parcela_m2": "Parcela catastral (m²)",
-    "sup_construida_sr_m2": "m² construidos sobre rasante",
-    "sup_construida_br_m2": "m² construidos bajo rasante",
-    "sup_vendible_m2": "m² vendibles",
-    "coste_construccion_m2": "Coste construcción por m² (€)",
-    "precio_suelo": "Precio suelo (€)",
-    "iva_compra": "IVA compra suelo (%)",
-    "ajd": "AJD compra (%)",
-    "precio_vivienda": "Precio vivienda (€ / ud)",
-    "precio_garaje": "Precio garaje (€ / ud)",
-    "precio_trastero": "Precio trastero (€ / ud)",
-    "mes_licencia": "Mes licencia",
-    "mes_inicio_obra": "Mes inicio obra",
-    "mes_venta_4v": "Mes venta 4 viviendas",
-    "mes_entrega": "Mes entrega / escrituras",
-    "sobrecoste_pct": "Sobrecoste costes obra (%)",
-    "caida_precios_pct": "Caída precio ventas (%)",
-    "interes_anual_pct": "Interés anual préstamo (%)",
-}
-
-MASTER_INPUT_TYPES = {
-    "activo": "text",
-    "referencia_catastral": "text",
-    "parcela_m2": "number",
-    "sup_construida_sr_m2": "number",
-    "sup_construida_br_m2": "number",
-    "sup_vendible_m2": "number",
-    "coste_construccion_m2": "number",
-    "precio_suelo": "number",
-    "iva_compra": "percent",
-    "ajd": "percent",
-    "precio_vivienda": "number",
-    "precio_garaje": "number",
-    "precio_trastero": "number",
-    "mes_licencia": "int",
-    "mes_inicio_obra": "int",
-    "mes_venta_4v": "int",
-    "mes_entrega": "int",
-    "sobrecoste_pct": "percent",
-    "caida_precios_pct": "percent",
-    "interes_anual_pct": "percent",
-}
-
-def build_master_inputs_df(inputs: dict) -> pd.DataFrame:
-    rows = []
-    ordered_keys = [
-        "activo", "referencia_catastral", "parcela_m2",
-        "sup_construida_sr_m2", "sup_construida_br_m2", "sup_vendible_m2",
-        "coste_construccion_m2", "precio_suelo", "iva_compra", "ajd",
-        "precio_vivienda", "precio_garaje", "precio_trastero",
-        "mes_licencia", "mes_inicio_obra", "mes_venta_4v", "mes_entrega",
-        "sobrecoste_pct", "caida_precios_pct", "interes_anual_pct",
-    ]
-    for key in ordered_keys:
-        raw = inputs[key]
-        kind = MASTER_INPUT_TYPES[key]
-        if kind == "percent":
-            value = fmt_es_number(safe_float(raw) * 100.0, 2)
-        elif kind in {"number", "int"}:
-            value = fmt_es_number(raw, 2 if kind == "number" else 0)
-        else:
-            value = str(raw)
-        rows.append({"Clave": key, "Campo": MASTER_INPUT_LABELS[key], "Valor": value})
-    return pd.DataFrame(rows)
-
-def apply_master_inputs_editor_to_state(edited_df: pd.DataFrame) -> bool:
-    changed = False
-    for _, row in edited_df.iterrows():
-        key = str(row.get("Clave", "")).strip()
-        if key not in MASTER_INPUT_TYPES:
-            continue
-        kind = MASTER_INPUT_TYPES[key]
-        raw_value = row.get("Valor", "")
-        if kind == "text":
-            new_value = str(raw_value).strip()
-        elif kind == "percent":
-            new_value = parse_es_number(raw_value) / 100.0
-        elif kind == "int":
-            new_value = int(round(parse_es_number(raw_value)))
-        else:
-            new_value = parse_es_number(raw_value)
-        current_value = st.session_state.get(key, DEFAULT_INPUTS.get(key))
-        comparable_current = safe_float(current_value) if kind != "text" else str(current_value)
-        comparable_new = safe_float(new_value) if kind != "text" else str(new_value)
-        if comparable_new != comparable_current:
-            st.session_state[key] = new_value
-            changed = True
-    return changed
-
-def default_cashflow_rules(inputs: dict | None = None) -> pd.DataFrame:
-    current = inputs or {}
-    mes_compra = int(current.get("mes_compra", SCENARIOS["Base"]["mes_compra"]))
-    mes_licencia = int(current.get("mes_licencia", SCENARIOS["Base"]["mes_licencia"]))
-    mes_inicio_obra = int(current.get("mes_inicio_obra", SCENARIOS["Base"]["mes_inicio_obra"]))
-    mes_venta_4v = int(current.get("mes_venta_4v", SCENARIOS["Base"]["mes_venta_4v"]))
-    mes_entrega = int(current.get("mes_entrega", SCENARIOS["Base"]["mes_entrega"]))
-    rows = [
-        {"Bucket": "ingresos", "Descripción": "Cobros por ventas", "Modo": "lineal", "Mes inicio": mes_venta_4v, "Mes fin": mes_entrega},
-        {"Bucket": "due_diligence", "Descripción": "Due diligence", "Modo": "puntual", "Mes inicio": mes_compra, "Mes fin": mes_compra},
-        {"Bucket": "compra", "Descripción": "Compra de suelo", "Modo": "puntual", "Mes inicio": mes_compra, "Mes fin": mes_compra},
-        {"Bucket": "proyecto_licencia", "Descripción": "Proyecto y licencias", "Modo": "lineal", "Mes inicio": 1, "Mes fin": max(mes_licencia, 1)},
-        {"Bucket": "pre_obra", "Descripción": "Preobra", "Modo": "lineal", "Mes inicio": mes_inicio_obra - 1, "Mes fin": mes_inicio_obra + 1},
-        {"Bucket": "obra", "Descripción": "Obra", "Modo": "lineal", "Mes inicio": mes_inicio_obra, "Mes fin": max(mes_entrega - 1, mes_inicio_obra)},
-        {"Bucket": "financiacion", "Descripción": "Financiación", "Modo": "lineal", "Mes inicio": mes_licencia, "Mes fin": max(mes_entrega - 1, mes_licencia)},
-        {"Bucket": "comercializacion", "Descripción": "Comercialización", "Modo": "lineal", "Mes inicio": mes_venta_4v, "Mes fin": mes_entrega},
-        {"Bucket": "cierre", "Descripción": "Cierre", "Modo": "puntual", "Mes inicio": mes_entrega, "Mes fin": mes_entrega},
-    ]
-    return pd.DataFrame(rows)
-
-def normalise_cashflow_rules_df(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    defaults = {"Bucket": "", "Descripción": "", "Modo": "lineal", "Mes inicio": 0, "Mes fin": 0}
-    for col, default in defaults.items():
-        if col not in out.columns:
-            out[col] = default
-    out["Bucket"] = out["Bucket"].fillna("").astype(str)
-    out["Descripción"] = out["Descripción"].fillna("").astype(str)
-    out["Modo"] = out["Modo"].fillna("lineal").astype(str).str.lower()
-    out.loc[~out["Modo"].isin(["lineal", "puntual"]), "Modo"] = "lineal"
-    out["Mes inicio"] = pd.to_numeric(out["Mes inicio"], errors="coerce").fillna(0).astype(int)
-    out["Mes fin"] = pd.to_numeric(out["Mes fin"], errors="coerce").fillna(0).astype(int)
-    out.loc[out["Mes fin"] < out["Mes inicio"], "Mes fin"] = out.loc[out["Mes fin"] < out["Mes inicio"], "Mes inicio"]
-    return out[["Bucket", "Descripción", "Modo", "Mes inicio", "Mes fin"]]
-
-def rules_signature(df: pd.DataFrame) -> tuple:
-    norm = normalise_cashflow_rules_df(df)
-    return tuple(tuple(x) for x in norm.to_records(index=False).tolist())
-
-
-def default_sales_collection_df(inputs: dict | None = None) -> pd.DataFrame:
-    current = inputs or {}
-    mes_venta_4v = int(current.get("mes_venta_4v", SCENARIOS["Base"]["mes_venta_4v"]))
-    mes_entrega = int(current.get("mes_entrega", SCENARIOS["Base"]["mes_entrega"]))
-    rows = [
-        {"Hito": "Reserva", "% Ingresos": 0.10, "Mes": mes_venta_4v},
-        {"Hito": "Contrato privado", "% Ingresos": 0.20, "Mes": min(mes_venta_4v + 2, mes_entrega)},
-        {"Hito": "Escritura", "% Ingresos": 0.70, "Mes": mes_entrega},
-    ]
-    return pd.DataFrame(rows)
-
-
-def normalise_sales_collection_df(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    defaults = {"Hito": "", "% Ingresos": 0.0, "Mes": 0}
-    for col, default in defaults.items():
-        if col not in out.columns:
-            out[col] = default
-    out["Hito"] = out["Hito"].fillna("").astype(str)
-    out["% Ingresos"] = pd.to_numeric(out["% Ingresos"], errors="coerce").fillna(0.0).apply(normalise_pct)
-    out["Mes"] = pd.to_numeric(out["Mes"], errors="coerce").fillna(0).astype(int)
-    return out[["Hito", "% Ingresos", "Mes"]]
-
-
-def default_loan_drawdown_df() -> pd.DataFrame:
-    rows = [
-        {"Bucket": "compra", "% Financiable": 0.50},
-        {"Bucket": "proyecto_licencia", "% Financiable": 0.70},
-        {"Bucket": "pre_obra", "% Financiable": 0.70},
-        {"Bucket": "obra", "% Financiable": 0.80},
-        {"Bucket": "financiacion", "% Financiable": 0.00},
-        {"Bucket": "comercializacion", "% Financiable": 0.00},
-        {"Bucket": "cierre", "% Financiable": 0.00},
-        {"Bucket": "due_diligence", "% Financiable": 0.00},
-        {"Bucket": "otros", "% Financiable": 0.00},
-    ]
-    return pd.DataFrame(rows)
-
-
-def normalise_loan_drawdown_df(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    defaults = {"Bucket": "", "% Financiable": 0.0}
-    for col, default in defaults.items():
-        if col not in out.columns:
-            out[col] = default
-    out["Bucket"] = out["Bucket"].fillna("").astype(str)
-    out["% Financiable"] = pd.to_numeric(out["% Financiable"], errors="coerce").fillna(0.0).apply(normalise_pct)
-    return out[["Bucket", "% Financiable"]]
-
 def init_state() -> None:
-    if "program_preset" not in st.session_state:
-        st.session_state["program_preset"] = "11 viviendas"
     if "editable_costs_store" not in st.session_state:
         st.session_state["editable_costs_store"] = build_base_cost_df()
     if "custom_accounting_tabs" not in st.session_state:
         st.session_state["custom_accounting_tabs"] = {"General": empty_accounting_tab_df()}
-    if "risk_items_store" not in st.session_state:
-        st.session_state["risk_items_store"] = empty_risk_df()
-    if "cashflow_rules_store" not in st.session_state:
-        st.session_state["cashflow_rules_store"] = default_cashflow_rules()
-    if "cashflow_rules_signature" not in st.session_state:
-        st.session_state["cashflow_rules_signature"] = rules_signature(st.session_state["cashflow_rules_store"])
-    if "sales_collection_store" not in st.session_state:
-        st.session_state["sales_collection_store"] = default_sales_collection_df()
-    if "loan_drawdown_store" not in st.session_state:
-        st.session_state["loan_drawdown_store"] = default_loan_drawdown_df()
     if "reset_counter" not in st.session_state:
         st.session_state["reset_counter"] = 0
 
@@ -635,104 +400,63 @@ def pem_scaled_cost(concepto: str, coste_base: float, pem: float) -> float:
         return coste_base * (pem / BASE_PEM)
     return coste_base
 
-def apply_program_preset(preset_name: str) -> None:
-    preset = PROGRAM_PRESETS[preset_name]
-    st.session_state["program_preset"] = preset_name
-    for k, v in preset.items():
-        st.session_state[k] = v
-
 
 def build_inputs() -> dict:
     st.sidebar.header("Control del modelo")
-    scenario_names = list(SCENARIOS.keys())
-    escenario_default = st.session_state.get("escenario", scenario_names[0])
-    escenario_index = scenario_names.index(escenario_default) if escenario_default in SCENARIOS else 0
-    escenario = st.sidebar.selectbox("Escenario", scenario_names, index=escenario_index)
+    escenario = st.sidebar.selectbox("Escenario", list(SCENARIOS.keys()), index=0)
     active = SCENARIOS[escenario]
-    st.session_state["escenario"] = escenario
 
     st.sidebar.subheader("Activo")
-    activo = st.sidebar.text_input("Activo", st.session_state.get("activo", DEFAULT_INPUTS["activo"]))
-    rc = st.sidebar.text_input("Referencia catastral", st.session_state.get("referencia_catastral", DEFAULT_INPUTS["referencia_catastral"]))
-    parcela_m2 = st.sidebar.number_input("Parcela catastral (m²)", min_value=0.0, value=float(st.session_state.get("parcela_m2", DEFAULT_INPUTS["parcela_m2"])), step=1.0)
+    activo = st.sidebar.text_input("Activo", DEFAULT_INPUTS["activo"])
+    rc = st.sidebar.text_input("Referencia catastral", DEFAULT_INPUTS["referencia_catastral"])
+    parcela_m2 = st.sidebar.number_input("Parcela catastral (m²)", min_value=0.0, value=float(DEFAULT_INPUTS["parcela_m2"]), step=1.0)
 
-    st.sidebar.subheader("Configuración del producto")
-    st.sidebar.caption("La promoción queda fijada en 11 viviendas. Ahora puedes elegir 1 o 2 sótanos.")
-    num_viviendas = 11
-    sotanos = st.sidebar.segmented_control("Número de sótanos", options=[1, 2], default=int(st.session_state.get("sotanos", DEFAULT_INPUTS["sotanos"])), key="sotanos")
-    if sotanos is None:
-        sotanos = int(st.session_state.get("sotanos", DEFAULT_INPUTS["sotanos"]))
-    sotanos = int(sotanos)
-
-    st.sidebar.subheader("Superficies")
+    st.sidebar.subheader("Superficies y PEM")
+    sotanos = st.sidebar.selectbox("Nº de sótanos", [1, 2], index=max(int(DEFAULT_INPUTS.get("sotanos", 1)) - 1, 0))
     sup_construida_sr_m2 = st.sidebar.number_input("m² construidos sobre rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_sr_m2", DEFAULT_INPUTS["sup_construida_sr_m2"])), step=10.0)
-    sup_construida_br_m2_default = float(BASE_SUP_CONSTRUIDA_BR * sotanos)
-    sup_construida_br_m2 = st.sidebar.number_input("m² construidos bajo rasante", min_value=0.0, value=float(st.session_state.get("sup_construida_br_m2", sup_construida_br_m2_default)), step=10.0)
-    sup_construida_total_m2 = sup_construida_sr_m2 + sup_construida_br_m2
+    base_br_por_sotano = float(DEFAULT_INPUTS["sup_construida_br_m2"])
+    sup_construida_br_m2 = base_br_por_sotano * sotanos
+    st.sidebar.metric("m² construidos bajo rasante", fmt_es_number(sup_construida_br_m2, 2))
     sup_vendible_m2 = st.sidebar.number_input("m² vendibles", min_value=0.0, value=float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])), step=10.0)
-
-    st.sidebar.subheader("PEM y costes base")
-    coste_construccion_m2 = st.sidebar.number_input("Coste construcción por m² (€)", min_value=0.0, value=float(st.session_state.get("coste_construccion_m2", DEFAULT_INPUTS["coste_construccion_m2"])), step=25.0)
+    coste_construccion_m2 = st.sidebar.number_input("Coste construcción por m² (€)", min_value=0.0, value=float(st.session_state.get("coste_construccion_m2", DEFAULT_INPUTS["coste_construccion_m2"])), step=10.0)
+    sup_construida_total_m2 = sup_construida_sr_m2 + sup_construida_br_m2
     pem = coste_construccion_m2 * sup_construida_total_m2
     st.sidebar.metric("PEM calculado automáticamente", eur(pem))
 
-    precio_suelo = st.sidebar.number_input("Precio suelo (€)", min_value=0.0, value=float(st.session_state.get("precio_suelo", DEFAULT_INPUTS["precio_suelo"])), step=5_000.0)
-    iva_compra = st.sidebar.number_input("IVA compra suelo (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("iva_compra", DEFAULT_INPUTS["iva_compra_suelo_pct"])) * 100, step=0.5) / 100
-    ajd = st.sidebar.number_input("AJD compra (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("ajd", DEFAULT_INPUTS["ajd_pct"])) * 100, step=0.1) / 100
+    st.sidebar.subheader("Inputs económicos")
+    precio_suelo = st.sidebar.number_input("Precio suelo (€)", min_value=0.0, value=float(DEFAULT_INPUTS["precio_suelo"]), step=5_000.0)
+    iva_compra = st.sidebar.number_input("IVA compra suelo (%)", min_value=0.0, max_value=100.0, value=DEFAULT_INPUTS["iva_compra_suelo_pct"] * 100, step=0.5) / 100
+    ajd = st.sidebar.number_input("AJD compra (%)", min_value=0.0, max_value=100.0, value=DEFAULT_INPUTS["ajd_pct"] * 100, step=0.1) / 100
 
     st.sidebar.subheader("Programa de ventas")
-    garajes_por_sotano = int(st.session_state.get("garajes_por_sotano", DEFAULT_INPUTS["garajes_por_sotano"]))
-    trasteros_por_sotano = int(st.session_state.get("trasteros_por_sotano", DEFAULT_INPUTS["trasteros_por_sotano"]))
-    num_garajes = garajes_por_sotano * sotanos
-    num_trasteros = trasteros_por_sotano * sotanos
-    st.sidebar.metric("Viviendas", str(num_viviendas))
-    st.sidebar.metric("Garajes totales", str(num_garajes))
-    st.sidebar.metric("Trasteros totales", str(num_trasteros))
+    num_viviendas = 11
+    garajes_por_sotano = int(DEFAULT_INPUTS.get("garajes_por_sotano", 10))
+    trasteros_por_sotano = int(DEFAULT_INPUTS.get("trasteros_por_sotano", 10))
+    num_garajes = sotanos * garajes_por_sotano
+    num_trasteros = sotanos * trasteros_por_sotano
+    st.sidebar.metric("Viviendas", num_viviendas)
+    st.sidebar.metric("Garajes totales", num_garajes)
+    st.sidebar.metric("Trasteros totales", num_trasteros)
     precio_vivienda = st.sidebar.number_input("Precio vivienda (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_vivienda", DEFAULT_INPUTS["precio_vivienda"])), step=5_000.0)
     precio_garaje = st.sidebar.number_input("Precio garaje (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_garaje", DEFAULT_INPUTS["precio_garaje"])), step=1_000.0)
     precio_trastero = st.sidebar.number_input("Precio trastero (€ / ud)", min_value=0.0, value=float(st.session_state.get("precio_trastero", DEFAULT_INPUTS["precio_trastero"])), step=500.0)
 
     st.sidebar.subheader("Calendario y sensibilidad")
-    mes_licencia = st.sidebar.number_input("Mes licencia", min_value=0, value=int(st.session_state.get("mes_licencia", active["mes_licencia"])), step=1)
-    mes_inicio_obra = st.sidebar.number_input("Mes inicio obra", min_value=0, value=int(st.session_state.get("mes_inicio_obra", active["mes_inicio_obra"])), step=1)
-    mes_venta_4v = st.sidebar.number_input("Mes venta 4 viviendas", min_value=0, value=int(st.session_state.get("mes_venta_4v", active["mes_venta_4v"])), step=1)
-    mes_entrega = st.sidebar.number_input("Mes entrega / escrituras", min_value=1, value=int(st.session_state.get("mes_entrega", active["mes_entrega"])), step=1)
-    sobrecoste_pct = st.sidebar.number_input("Sobrecoste costes obra (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("sobrecoste_pct", active["sobrecoste_pct"])) * 100, step=0.5) / 100
-    caida_precios_pct = st.sidebar.number_input("Caída precio ventas (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("caida_precios_pct", active["caida_precios_pct"])) * 100, step=0.5) / 100
-    interes_anual_pct = st.sidebar.number_input("Interés anual préstamo (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("interes_anual_pct", active["interes_anual_pct"])) * 100, step=0.25) / 100
-
-    state_updates = {
-        "activo": activo,
-        "referencia_catastral": rc,
-        "parcela_m2": parcela_m2,
-        "sup_construida_sr_m2": sup_construida_sr_m2,
-        "sup_construida_br_m2": sup_construida_br_m2,
-        "sup_vendible_m2": sup_vendible_m2,
-        "coste_construccion_m2": coste_construccion_m2,
-        "precio_suelo": precio_suelo,
-        "iva_compra": iva_compra,
-        "ajd": ajd,
-        "precio_vivienda": precio_vivienda,
-        "precio_garaje": precio_garaje,
-        "precio_trastero": precio_trastero,
-        "mes_licencia": mes_licencia,
-        "mes_inicio_obra": mes_inicio_obra,
-        "mes_venta_4v": mes_venta_4v,
-        "mes_entrega": mes_entrega,
-        "sobrecoste_pct": sobrecoste_pct,
-        "caida_precios_pct": caida_precios_pct,
-        "interes_anual_pct": interes_anual_pct,
-        "sotanos": sotanos,
-    }
-    for k, v in state_updates.items():
-        st.session_state[k] = v
-
+    mes_licencia = st.sidebar.number_input("Mes licencia", min_value=0, value=int(active["mes_licencia"]), step=1)
+    mes_inicio_obra = st.sidebar.number_input("Mes inicio obra", min_value=0, value=int(active["mes_inicio_obra"]), step=1)
+    mes_venta_4v = st.sidebar.number_input("Mes venta 4 viviendas", min_value=0, value=int(active["mes_venta_4v"]), step=1)
+    mes_entrega = st.sidebar.number_input("Mes entrega / escrituras", min_value=1, value=int(active["mes_entrega"]), step=1)
+    sobrecoste_pct = st.sidebar.number_input("Sobrecoste costes obra (%)", min_value=0.0, max_value=100.0, value=active["sobrecoste_pct"] * 100, step=0.5) / 100
+    caida_precios_pct = st.sidebar.number_input("Caída precio ventas (%)", min_value=0.0, max_value=100.0, value=active["caida_precios_pct"] * 100, step=0.5) / 100
+    interes_anual_pct = st.sidebar.number_input("Interés anual préstamo (%)", min_value=0.0, max_value=100.0, value=active["interes_anual_pct"] * 100, step=0.25) / 100
     return {
-        "program_preset": f"11 viviendas · {sotanos} sótano(s)",
         "escenario": escenario,
         "activo": activo,
         "referencia_catastral": rc,
         "parcela_m2": parcela_m2,
+        "sotanos": sotanos,
+        "garajes_por_sotano": garajes_por_sotano,
+        "trasteros_por_sotano": trasteros_por_sotano,
         "sup_construida_sr_m2": sup_construida_sr_m2,
         "sup_construida_br_m2": sup_construida_br_m2,
         "sup_construida_total_m2": sup_construida_total_m2,
@@ -743,7 +467,6 @@ def build_inputs() -> dict:
         "iva_compra": iva_compra,
         "ajd": ajd,
         "num_viviendas": num_viviendas,
-        "sotanos": sotanos,
         "num_garajes": num_garajes,
         "num_trasteros": num_trasteros,
         "precio_vivienda": precio_vivienda,
@@ -758,7 +481,6 @@ def build_inputs() -> dict:
         "caida_precios_pct": caida_precios_pct,
         "interes_anual_pct": interes_anual_pct,
     }
-
 def build_cost_df(inputs: dict, edited_df: pd.DataFrame) -> pd.DataFrame:
     df = ensure_cost_editor_columns(edited_df, inputs["pem"]).copy()
     if inputs["pem"] > 0:
@@ -784,6 +506,8 @@ def build_cost_df(inputs: dict, edited_df: pd.DataFrame) -> pd.DataFrame:
 
     override("IVA compra suelo", iva_compra_suelo)
     override("AJD compra suelo", ajd_compra_suelo)
+    override("Construcción sobre rasante", inputs["coste_construccion_m2"] * inputs["sup_construida_sr_m2"])
+    override("Sótanos (10 plazas + 10 trasteros por sótano)", inputs["coste_construccion_m2"] * inputs["sup_construida_br_m2"])
 
     pagos_suelo = ["Primer pago suelo", "Pago aplazado suelo", "Pago adicional obligado", "Resto precio suelo"]
     suelo_actual = df.loc[df["Concepto"].isin(pagos_suelo), "Coste (€)"].sum()
@@ -814,7 +538,7 @@ def compute_model(inputs: dict, edited_df: pd.DataFrame) -> dict:
     margen_bruto = ingresos_totales - coste_total_sin_iva_compra
     margen_sobre_ventas = margen_bruto / ingresos_totales if ingresos_totales else 0.0
     coste_construccion_sr = float(costes_df.loc[costes_df["Concepto"] == "Construcción sobre rasante", "Coste (€)"].sum())
-    coste_construccion_br = float(costes_df.loc[costes_df["Concepto"] == "Construcción bajo rasante", "Coste (€)"].sum())
+    coste_construccion_br = float(costes_df.loc[costes_df["Concepto"] == "Sótanos (10 plazas + 10 trasteros por sótano)", "Coste (€)"].sum())
     coste_construccion_total = coste_construccion_sr + coste_construccion_br
     coste_financiacion = float(costes_df.loc[costes_df["Fase"] == "Fase 4 · Financiación de la promoción", "Coste (€)"].sum())
     coste_contabilidad_adicional = float(costes_df.loc[costes_df["Bucket"] == "otros", "Coste (€)"].sum())
@@ -873,73 +597,19 @@ def allocate_even(series: list[float], start: int, end: int, total: float) -> No
         series[i] += total / periods
 
 def build_cashflow(inputs: dict, model: dict) -> pd.DataFrame:
-    rules_df = normalise_cashflow_rules_df(st.session_state.get("cashflow_rules_store", default_cashflow_rules(inputs)))
-    sales_df = normalise_sales_collection_df(st.session_state.get("sales_collection_store", default_sales_collection_df(inputs)))
-    loan_df = normalise_loan_drawdown_df(st.session_state.get("loan_drawdown_store", default_loan_drawdown_df()))
-    max_rule_month = 0 if rules_df.empty else int(max(rules_df["Mes fin"].max(), rules_df["Mes inicio"].max()))
-    max_sales_month = 0 if sales_df.empty else int(sales_df["Mes"].max())
-    horizon = max(inputs["mes_entrega"], inputs["mes_venta_4v"], 12, max_rule_month, max_sales_month) + 1
+    horizon = max(inputs["mes_entrega"], inputs["mes_venta_4v"], 12) + 1
     meses = list(range(horizon + 1))
-    entradas_clientes = [0.0 for _ in meses]
-    entradas_prestamo = [0.0 for _ in meses]
+    entradas = [0.0 for _ in meses]
     salidas = [0.0 for _ in meses]
-    bucket_amounts = model["costes_df"].groupby("Bucket")["Coste (€)"].sum().to_dict()
-
-    def ensure_len(series: list[float], end: int) -> None:
-        if end > len(series) - 1:
-            series.extend([0.0] * (end - (len(series) - 1)))
-
-    def apply_rule(target_series: list[float], start: int, end: int, total: float, mode: str) -> None:
-        if abs(total) < 0.005:
-            return
-        start = max(int(start), 0)
-        end = max(int(end), start)
-        ensure_len(target_series, end)
-        if mode == "puntual":
-            target_series[start] += total
-        else:
-            allocate_even(target_series, start, end, total)
-
-    pct_sum = float(sales_df["% Ingresos"].sum()) if not sales_df.empty else 0.0
-    sales_normaliser = pct_sum if pct_sum > 0 else 1.0
-    for _, row in sales_df.iterrows():
-        mes = int(row["Mes"])
-        pct_ingresos = safe_float(row["% Ingresos"]) / sales_normaliser
-        ensure_len(entradas_clientes, mes)
-        entradas_clientes[mes] += model["ingresos_totales"] * pct_ingresos
-
-    bucket_series: dict[str, list[float]] = {}
-    for _, rule in rules_df.iterrows():
-        bucket = str(rule["Bucket"]).strip()
-        if bucket == "ingresos":
-            continue
-        mode = str(rule["Modo"]).strip().lower()
-        total = safe_float(bucket_amounts.get(bucket, 0.0))
-        if bucket not in bucket_series:
-            bucket_series[bucket] = [0.0 for _ in range(len(salidas))]
-        apply_rule(bucket_series[bucket], int(rule["Mes inicio"]), int(rule["Mes fin"]), total, mode)
-
-    max_len = len(salidas)
-    for series in bucket_series.values():
-        max_len = max(max_len, len(series))
-    if len(salidas) < max_len:
-        salidas.extend([0.0] * (max_len - len(salidas)))
-        entradas_clientes.extend([0.0] * (max_len - len(entradas_clientes)))
-        entradas_prestamo.extend([0.0] * (max_len - len(entradas_prestamo)))
-    for bucket, series in bucket_series.items():
-        if len(series) < max_len:
-            series.extend([0.0] * (max_len - len(series)))
-        for i, v in enumerate(series):
-            salidas[i] += v
-
-    loan_map = dict(loan_df.values.tolist()) if not loan_df.empty else {}
-    for bucket, series in bucket_series.items():
-        pct_fin = safe_float(loan_map.get(bucket, 0.0))
-        if pct_fin <= 0:
-            continue
-        for i, v in enumerate(series):
-            entradas_prestamo[i] += v * pct_fin
-
+    allocate_even(entradas, inputs["mes_venta_4v"], inputs["mes_entrega"], model["ingresos_totales"])
+    buckets = model["costes_df"].groupby("Bucket")["Coste (€)"].sum().to_dict()
+    salidas[inputs["mes_compra"]] += buckets.get("compra", 0.0) + buckets.get("due_diligence", 0.0)
+    allocate_even(salidas, 1, max(inputs["mes_licencia"], 1), buckets.get("proyecto_licencia", 0.0))
+    allocate_even(salidas, inputs["mes_inicio_obra"] - 1, inputs["mes_inicio_obra"] + 1, buckets.get("pre_obra", 0.0))
+    allocate_even(salidas, inputs["mes_inicio_obra"], max(inputs["mes_entrega"] - 1, inputs["mes_inicio_obra"]), buckets.get("obra", 0.0))
+    allocate_even(salidas, inputs["mes_licencia"], max(inputs["mes_entrega"] - 1, inputs["mes_licencia"]), buckets.get("financiacion", 0.0))
+    allocate_even(salidas, inputs["mes_venta_4v"], inputs["mes_entrega"], buckets.get("comercializacion", 0.0))
+    salidas[inputs["mes_entrega"]] += buckets.get("cierre", 0.0)
     for _, df in st.session_state.get("custom_accounting_tabs", {}).items():
         tab_df = normalise_accounting_tab_df(df)
         for _, row in tab_df.iterrows():
@@ -948,32 +618,23 @@ def build_cashflow(inputs: dict, model: dict) -> pd.DataFrame:
                 continue
             mes = parse_month_from_date(str(row["Fecha"]))
             if mes is None:
-                mes = int(inputs["mes_compra"])
-            while mes > len(salidas) - 1:
-                salidas.append(0.0)
-                entradas_clientes.append(0.0)
-                entradas_prestamo.append(0.0)
-            salidas[mes] += importe
-
-    entradas_totales = [c + p for c, p in zip(entradas_clientes, entradas_prestamo)]
-    neto = [e - s for e, s in zip(entradas_totales, salidas)]
+                salidas[inputs["mes_compra"]] += importe
+            else:
+                if mes > len(salidas) - 1:
+                    extra = mes - (len(salidas) - 1)
+                    salidas.extend([0.0] * extra)
+                    entradas.extend([0.0] * extra)
+                salidas[mes] += importe
+    neto = [e - s for e, s in zip(entradas, salidas)]
     acumulado = []
     running = 0.0
     for v in neto:
         running += v
         acumulado.append(running)
-    return pd.DataFrame({
-        "Mes": list(range(len(neto))),
-        "Entradas clientes (€)": entradas_clientes,
-        "Entradas préstamo (€)": entradas_prestamo,
-        "Entradas totales (€)": entradas_totales,
-        "Salidas (€)": salidas,
-        "Flujo neto (€)": neto,
-        "Flujo acumulado (€)": acumulado,
-    })
+    return pd.DataFrame({"Mes": list(range(len(neto))), "Entradas (€)": entradas, "Salidas (€)": salidas, "Flujo neto (€)": neto, "Flujo acumulado (€)": acumulado})
 
 def build_risk_df():
-    df = normalise_risk_df(st.session_state.get("risk_items_store", empty_risk_df()))
+    df = pd.DataFrame(RISK_ITEMS)
     df["Semáforo"] = df["puntos"].apply(riesgo_label)
     total = int(df["puntos"].sum())
     if total >= 14:
@@ -1054,14 +715,6 @@ def build_pdf_bytes(inputs: dict, model: dict, risk_points: int, global_risk: st
 init_state()
 inputs = build_inputs()
 
-fresh_default_rules = default_cashflow_rules(inputs)
-current_rules_signature = rules_signature(st.session_state.get("cashflow_rules_store", fresh_default_rules))
-previous_auto_signature = st.session_state.get("cashflow_rules_signature")
-new_auto_signature = rules_signature(fresh_default_rules)
-if previous_auto_signature == current_rules_signature:
-    st.session_state["cashflow_rules_store"] = fresh_default_rules
-st.session_state["cashflow_rules_signature"] = rules_signature(st.session_state.get("cashflow_rules_store", fresh_default_rules))
-
 header_left, header_right = st.columns([0.72, 0.28])
 with header_left:
     st.title("Estudio Viabilidad Proyecto by Gpg")
@@ -1069,31 +722,10 @@ with header_left:
 with header_right:
     st.info(f"Escenario activo: **{inputs['escenario']}**\n\nPEM: **{eur(inputs['pem'])}**\n\nm² vendibles: **{inputs['sup_vendible_m2']:.0f}**")
 
-tabs = st.tabs(["Dashboard", "Inputs maestros", "Costes editables", "Contabilidad adicional", "Ratios serios €/m²", "Resumen", "Cash-flow", "Riesgo", "Exportar"])
-tab1, tab_inputs, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = tabs
+tabs = st.tabs(["Dashboard", "Costes editables", "Contabilidad adicional", "Ratios serios €/m²", "Resumen", "Cash-flow", "Riesgo", "Exportar"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = tabs
 
 synced_editor_source = sync_cost_rows_with_pem(st.session_state["editable_costs_store"], inputs["pem"])
-
-
-with tab_inputs:
-    st.subheader("Inputs maestros editables")
-    st.caption("Esta tabla permite editar desde una sola vista los datos que gobiernan el modelo. Al cambiar cualquier valor, el PEM y todas las tablas dependientes se recalculan automáticamente.")
-    master_df = build_master_inputs_df(inputs)
-    edited_master_df = st.data_editor(
-        master_df,
-        key="master_inputs_editor",
-        hide_index=True,
-        width="stretch",
-        disabled=["Clave", "Campo"],
-        column_config={
-            "Clave": st.column_config.TextColumn("Clave"),
-            "Campo": st.column_config.TextColumn("Campo"),
-            "Valor": st.column_config.TextColumn("Valor"),
-        },
-        column_order=["Campo", "Valor", "Clave"],
-    )
-    if apply_master_inputs_editor_to_state(edited_master_df):
-        st.rerun()
 
 with tab2:
     st.subheader("Costes editables")
@@ -1227,7 +859,7 @@ with tab1:
     row2[2].metric("€ / m² venta vendible", eur_m2(model["precio_m2_venta_vendible"]))
     row2[3].metric("€ / m² margen vendible", eur_m2(model["margen_m2_vendible"]))
     row2[4].metric("Riesgo global", global_risk)
-    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["PEM referencia", eur(inputs["pem"])],["Preset de producto", inputs["program_preset"]],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes venta 4 viviendas", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
+    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["Coste construcción por m²", eur_m2(inputs["coste_construccion_m2"])],["PEM calculado", eur(inputs["pem"])],["Nº sótanos", str(inputs["sotanos"])],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes venta 4 viviendas", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
     st.dataframe(display_df(ficha), width="stretch", hide_index=True)
     st.subheader("Dictamen automático")
     if dictamen_titulo == "Viable":
@@ -1279,88 +911,14 @@ with tab5:
 
 with tab6:
     st.subheader("Cash-flow mensual")
-    st.caption("Ahora puedes editar tres capas: timing de costes, cobros comerciales por hitos y porcentaje financiable por bucket. Todo recalcula al momento.")
-    editable_rules_df = normalise_cashflow_rules_df(st.session_state.get("cashflow_rules_store", default_cashflow_rules(inputs)))
-    edited_rules_df = st.data_editor(
-        editable_rules_df,
-        key="cashflow_rules_editor",
-        hide_index=True,
-        width="stretch",
-        num_rows="dynamic",
-        column_config={
-            "Bucket": st.column_config.SelectboxColumn("Bucket", options=["ingresos", "due_diligence", "compra", "proyecto_licencia", "pre_obra", "obra", "financiacion", "comercializacion", "cierre", "otros"]),
-            "Descripción": st.column_config.TextColumn("Descripción"),
-            "Modo": st.column_config.SelectboxColumn("Modo", options=["lineal", "puntual"]),
-            "Mes inicio": st.column_config.NumberColumn("Mes inicio", min_value=0, step=1, format="%d"),
-            "Mes fin": st.column_config.NumberColumn("Mes fin", min_value=0, step=1, format="%d"),
-        },
-        column_order=["Bucket", "Descripción", "Modo", "Mes inicio", "Mes fin"],
-    )
-    st.session_state["cashflow_rules_store"] = normalise_cashflow_rules_df(edited_rules_df)
-    st.markdown("#### Cobros comerciales por hitos")
-    sales_df = normalise_sales_collection_df(st.session_state.get("sales_collection_store", default_sales_collection_df(inputs)))
-    edited_sales_df = st.data_editor(
-        sales_df,
-        key="sales_collection_editor",
-        hide_index=True,
-        width="stretch",
-        num_rows="dynamic",
-        column_config={
-            "Hito": st.column_config.TextColumn("Hito"),
-            "% Ingresos": st.column_config.NumberColumn("% Ingresos", min_value=0.0, step=0.01, format="%.2f"),
-            "Mes": st.column_config.NumberColumn("Mes", min_value=0, step=1, format="%d"),
-        },
-        column_order=["Hito", "% Ingresos", "Mes"],
-    )
-    st.session_state["sales_collection_store"] = normalise_sales_collection_df(edited_sales_df)
-    total_sales_pct = float(st.session_state["sales_collection_store"]["% Ingresos"].sum()) if not st.session_state["sales_collection_store"].empty else 0.0
-    st.caption(f"Suma cobros comerciales: {fmt_es_percent_from_ratio(total_sales_pct)}% del ingreso total. Si no suma 100%, el sistema lo normaliza automáticamente.")
-
-    st.markdown("#### Disposición del préstamo por buckets de coste")
-    loan_df = normalise_loan_drawdown_df(st.session_state.get("loan_drawdown_store", default_loan_drawdown_df()))
-    edited_loan_df = st.data_editor(
-        loan_df,
-        key="loan_drawdown_editor",
-        hide_index=True,
-        width="stretch",
-        num_rows="dynamic",
-        column_config={
-            "Bucket": st.column_config.SelectboxColumn("Bucket", options=["due_diligence", "compra", "proyecto_licencia", "pre_obra", "obra", "financiacion", "comercializacion", "cierre", "otros"]),
-            "% Financiable": st.column_config.NumberColumn("% Financiable", min_value=0.0, max_value=1.0, step=0.01, format="%.2f"),
-        },
-        column_order=["Bucket", "% Financiable"],
-    )
-    st.session_state["loan_drawdown_store"] = normalise_loan_drawdown_df(edited_loan_df)
-
-    cashflow_df = build_cashflow(inputs, model)
-    summary_cf = st.session_state["cashflow_rules_store"].copy()
-    st.dataframe(display_df(summary_cf), width="stretch", hide_index=True)
     cf_show = cashflow_df.copy()
-    for col in ["Entradas clientes (€)", "Entradas préstamo (€)", "Entradas totales (€)", "Salidas (€)", "Flujo neto (€)", "Flujo acumulado (€)"]:
+    for col in ["Entradas (€)", "Salidas (€)", "Flujo neto (€)", "Flujo acumulado (€)"]:
         cf_show[col] = cf_show[col].map(eur)
     st.dataframe(display_df(cf_show), width="stretch", hide_index=True)
-    st.line_chart(cashflow_df.set_index("Mes")[["Entradas clientes (€)", "Entradas préstamo (€)", "Entradas totales (€)", "Salidas (€)", "Flujo neto (€)", "Flujo acumulado (€)"]])
+    st.line_chart(cashflow_df.set_index("Mes")[["Entradas (€)", "Salidas (€)", "Flujo neto (€)", "Flujo acumulado (€)"]])
 
 with tab7:
     st.subheader("Semáforo automático de riesgo")
-    st.caption("También puedes editar esta tabla. Los puntos modifican automáticamente el semáforo y el dictamen global.")
-    editable_risk_df = normalise_risk_df(st.session_state.get("risk_items_store", empty_risk_df()))
-    edited_risk_df = st.data_editor(
-        editable_risk_df,
-        key="risk_editor",
-        hide_index=True,
-        width="stretch",
-        num_rows="dynamic",
-        column_config={
-            "categoria": st.column_config.TextColumn("Categoría"),
-            "estado": st.column_config.TextColumn("Estado"),
-            "puntos": st.column_config.NumberColumn("Puntos", min_value=0, max_value=3, step=1, format="%d"),
-            "comentario": st.column_config.TextColumn("Comentario"),
-        },
-        column_order=["categoria", "estado", "puntos", "comentario"],
-    )
-    st.session_state["risk_items_store"] = normalise_risk_df(edited_risk_df)
-    risk_df, risk_points, global_risk = build_risk_df()
     risk_show = risk_df.rename(columns={"categoria":"Categoría","estado":"Estado","puntos":"Puntos","comentario":"Comentario"})
     st.dataframe(display_df(risk_show), width="stretch", hide_index=True)
     if global_risk == "Alto":
@@ -1380,7 +938,7 @@ with tab8:
         {"Concepto": "Trasteros", "Importe (€)": model["ingresos_trasteros"]},
         {"Concepto": "Ingresos totales", "Importe (€)": model["ingresos_totales"]},
     ])
-    export_dfs = {"Resumen": export_resumen,"Ingresos": export_ingresos,"Costes": export_costes,"Cashflow": cashflow_df,"Cobros ventas": normalise_sales_collection_df(st.session_state.get("sales_collection_store", default_sales_collection_df(inputs))),"Prestamo": normalise_loan_drawdown_df(st.session_state.get("loan_drawdown_store", default_loan_drawdown_df())),"Riesgo": risk_df}
+    export_dfs = {"Resumen": export_resumen,"Ingresos": export_ingresos,"Costes": export_costes,"Cashflow": cashflow_df,"Riesgo": risk_df}
     contabilidad_adicional_df = build_additional_accounting_df(inputs["pem"])
     if not contabilidad_adicional_df.empty:
         export_dfs["Contabilidad"] = contabilidad_adicional_df[["Fase", "Hito", "Concepto", "Coste (€)", "% PEM", "Observaciones"]]
