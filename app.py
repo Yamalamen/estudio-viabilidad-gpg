@@ -275,6 +275,60 @@ def normalise_accounting_tab_df(df: pd.DataFrame) -> pd.DataFrame:
     out["Importe (€)"] = pd.to_numeric(out["Importe (€)"], errors="coerce").fillna(0.0)
     return out[["Fecha", "Concepto", "Importe (€)", "Observaciones"]]
 
+def default_sales_mix_df(num_viviendas: int, precio_vivienda: float, sup_vendible_m2: float) -> pd.DataFrame:
+    unidades = max(int(num_viviendas), 0)
+    m2_ud = (safe_float(sup_vendible_m2) / unidades) if unidades else 0.0
+    return pd.DataFrame([{
+        "Tipología": "Vivienda tipo",
+        "Unidades": unidades,
+        "Precio unitario (€)": safe_float(precio_vivienda),
+        "m² vendibles/ud": m2_ud,
+        "Observaciones": "",
+    }])
+
+def normalise_sales_mix_df(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    defaults = {"Tipología": "", "Unidades": 0, "Precio unitario (€)": 0.0, "m² vendibles/ud": 0.0, "Observaciones": ""}
+    for col, default in defaults.items():
+        if col not in out.columns:
+            out[col] = default
+    out["Tipología"] = out["Tipología"].fillna("").astype(str)
+    out["Observaciones"] = out["Observaciones"].fillna("").astype(str)
+    out["Unidades"] = pd.to_numeric(out["Unidades"], errors="coerce").fillna(0).astype(int).clip(lower=0)
+    out["Precio unitario (€)"] = pd.to_numeric(out["Precio unitario (€)"], errors="coerce").fillna(0.0)
+    out["m² vendibles/ud"] = pd.to_numeric(out["m² vendibles/ud"], errors="coerce").fillna(0.0)
+    return out[["Tipología", "Unidades", "Precio unitario (€)", "m² vendibles/ud", "Observaciones"]]
+
+def sales_mix_with_totals(df: pd.DataFrame, caida_precios_pct: float = 0.0) -> pd.DataFrame:
+    out = normalise_sales_mix_df(df)
+    out["Ingresos brutos línea (€)"] = out["Unidades"] * out["Precio unitario (€)"]
+    out["Ingresos netos línea (€)"] = out["Ingresos brutos línea (€)"] * (1 - safe_float(caida_precios_pct))
+    out["m² vendibles línea"] = out["Unidades"] * out["m² vendibles/ud"]
+    return out
+
+def sync_sales_mix_with_inputs(num_viviendas: int, precio_vivienda: float, sup_vendible_m2: float) -> pd.DataFrame:
+    current = st.session_state.get("sales_mix_store")
+    if current is None or len(current) == 0:
+        return default_sales_mix_df(num_viviendas, precio_vivienda, sup_vendible_m2)
+    df = normalise_sales_mix_df(current)
+    total_units = int(df["Unidades"].sum()) if not df.empty else 0
+    if total_units == 0 and num_viviendas > 0:
+        return default_sales_mix_df(num_viviendas, precio_vivienda, sup_vendible_m2)
+    if total_units == 0:
+        return df
+    if num_viviendas >= 0 and total_units != num_viviendas:
+        scaled = (df["Unidades"] * (num_viviendas / total_units)).round().astype(int)
+        diff = int(num_viviendas - scaled.sum())
+        if len(scaled) > 0:
+            scaled.iloc[0] = max(int(scaled.iloc[0] + diff), 0)
+        df["Unidades"] = scaled
+    total_line_m2 = float((df["Unidades"] * df["m² vendibles/ud"]).sum())
+    if total_line_m2 == 0 and num_viviendas > 0:
+        df.loc[:, "m² vendibles/ud"] = safe_float(sup_vendible_m2) / num_viviendas if num_viviendas else 0.0
+    if float(df["Precio unitario (€)"].sum()) == 0 and num_viviendas > 0:
+        df.loc[:, "Precio unitario (€)"] = safe_float(precio_vivienda)
+    return df
+
 def build_additional_accounting_df(pem: float) -> pd.DataFrame:
     rows = []
     tabs_store = st.session_state.get("custom_accounting_tabs", {})
@@ -325,6 +379,8 @@ def init_state() -> None:
                 st.session_state[state_key] = value
     if "editable_costs_store" not in st.session_state:
         st.session_state["editable_costs_store"] = build_base_cost_df()
+    if "sales_mix_store" not in st.session_state:
+        st.session_state["sales_mix_store"] = default_sales_mix_df(int(st.session_state.get("num_viviendas", DEFAULT_INPUTS["num_viviendas"])), float(st.session_state.get("precio_vivienda", DEFAULT_INPUTS["precio_vivienda"])), float(st.session_state.get("sup_vendible_m2", DEFAULT_INPUTS["sup_vendible_m2"])))
     if "custom_accounting_tabs" not in st.session_state:
         st.session_state["custom_accounting_tabs"] = {"General": empty_accounting_tab_df()}
     if "reset_counter" not in st.session_state:
@@ -445,6 +501,8 @@ def build_inputs() -> dict:
     caida_precios_pct = st.sidebar.number_input("Caída precio ventas (%)", min_value=0.0, max_value=100.0, step=0.5, value=float(st.session_state.get(f"{escenario}_caida_precios_pct", SCENARIOS[escenario]["caida_precios_pct"])) * 100.0, key=f"caida_precios_pct_{escenario}") / 100.0
     interes_anual_pct = st.sidebar.number_input("Interés anual préstamo (%)", min_value=0.0, max_value=100.0, step=0.25, value=float(st.session_state.get(f"{escenario}_interes_anual_pct", SCENARIOS[escenario]["interes_anual_pct"])) * 100.0, key=f"interes_anual_pct_{escenario}") / 100.0
 
+    st.session_state["sales_mix_store"] = sync_sales_mix_with_inputs(int(num_viviendas), float(precio_vivienda), float(sup_vendible_m2))
+
     return {
         "escenario": escenario,
         "activo": activo,
@@ -464,6 +522,7 @@ def build_inputs() -> dict:
         "precio_vivienda": precio_vivienda,
         "precio_garaje": precio_garaje,
         "precio_trastero": precio_trastero,
+        "sales_mix_df": sales_mix_with_totals(st.session_state["sales_mix_store"], caida_precios_pct),
         "mes_compra": int(mes_compra),
         "mes_licencia": int(mes_licencia),
         "mes_inicio_obra": int(mes_inicio_obra),
@@ -518,7 +577,8 @@ def build_cost_df(inputs: dict, edited_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def compute_model(inputs: dict, edited_df: pd.DataFrame) -> dict:
-    ingresos_viviendas = inputs["precio_vivienda"] * inputs["num_viviendas"] * (1 - inputs["caida_precios_pct"])
+    sales_mix_df = sales_mix_with_totals(inputs.get("sales_mix_df", pd.DataFrame()), inputs["caida_precios_pct"])
+    ingresos_viviendas = float(sales_mix_df["Ingresos netos línea (€)"].sum()) if not sales_mix_df.empty else inputs["precio_vivienda"] * inputs["num_viviendas"] * (1 - inputs["caida_precios_pct"])
     ingresos_garajes = inputs["precio_garaje"] * inputs["num_garajes"] * (1 - inputs["caida_precios_pct"])
     ingresos_trasteros = inputs["precio_trastero"] * inputs["num_trasteros"] * (1 - inputs["caida_precios_pct"])
     ingresos_totales = ingresos_viviendas + ingresos_garajes + ingresos_trasteros
@@ -648,7 +708,7 @@ def build_dictamen(model: dict, global_risk: str) -> tuple[str, str]:
 def build_summary_df(inputs: dict, model: dict, risk_points: int, global_risk: str) -> pd.DataFrame:
     rows = [
         ["Activo", str(inputs["activo"])], ["Referencia catastral", str(inputs["referencia_catastral"])], ["Escenario", str(inputs["escenario"])],
-        ["PEM", eur(inputs["pem"])], ["Ingresos totales", eur(model["ingresos_totales"])], ["Coste total ex IVA compra", eur(model["coste_total_sin_iva_compra"])],
+        ["PEM", eur(inputs["pem"])], ["Ingresos totales", eur(model["ingresos_totales"])], ["Ingresos viviendas por mix", eur(model["ingresos_viviendas"])], ["Coste total ex IVA compra", eur(model["coste_total_sin_iva_compra"])],
         ["Caja total incl. IVA compra", eur(model["coste_total_con_iva"])], ["Contabilidad adicional", eur(model["coste_contabilidad_adicional"])],
         ["Margen bruto", eur(model["margen_bruto"])], ["Margen sobre ventas", pct(model["margen_sobre_ventas"])], ["Riesgo global", global_risk], ["Puntos de riesgo", str(risk_points)],
     ]
@@ -709,14 +769,54 @@ inputs = build_inputs()
 header_left, header_right = st.columns([0.72, 0.28])
 with header_left:
     st.title("Estudio Viabilidad Proyecto by Gpg")
-    st.caption("Versión definitiva: costes editables con % PEM sincronizado, contabilidad adicional por pestañas, exportación Excel/CSV/PDF y contabilidad integrada en el modelo.")
+    st.caption("Versión avanzada: todos los drivers editables, mix comercial por tipologías, costes con % PEM sincronizado y exportación Excel/CSV/PDF.")
 with header_right:
     st.info(f"Escenario activo: **{inputs['escenario']}**\n\nPEM: **{eur(inputs['pem'])}**\n\nm² vendibles: **{inputs['sup_vendible_m2']:.0f}**")
 
-tabs = st.tabs(["Dashboard", "Costes editables", "Contabilidad adicional", "Ratios serios €/m²", "Resumen", "Cash-flow", "Riesgo", "Exportar"])
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = tabs
+tabs = st.tabs(["Dashboard", "Mix comercial", "Costes editables", "Contabilidad adicional", "Ratios serios €/m²", "Resumen", "Cash-flow", "Riesgo", "Exportar"])
+tab1, tab_mix, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = tabs
 
 synced_editor_source = sync_cost_rows_with_pem(st.session_state["editable_costs_store"], inputs["pem"])
+
+with tab_mix:
+    st.subheader("Mix comercial editable")
+    st.caption("Puedes distribuir las viviendas por tipologías, unidades, precio unitario y m² vendibles por vivienda. Esta tabla gobierna los ingresos de viviendas.")
+    mix_source = normalise_sales_mix_df(st.session_state["sales_mix_store"])
+    edited_mix_df = st.data_editor(
+        mix_source,
+        key="sales_mix_editor",
+        hide_index=True,
+        width="stretch",
+        num_rows="dynamic",
+        column_config={
+            "Tipología": st.column_config.TextColumn("Tipología"),
+            "Unidades": st.column_config.NumberColumn("Unidades", min_value=0, step=1),
+            "Precio unitario (€)": st.column_config.NumberColumn("Precio unitario (€)", min_value=0.0, step=1000.0, format="%.2f"),
+            "m² vendibles/ud": st.column_config.NumberColumn("m² vendibles/ud", min_value=0.0, step=1.0, format="%.2f"),
+            "Observaciones": st.column_config.TextColumn("Observaciones"),
+        },
+    )
+    cleaned_mix = normalise_sales_mix_df(edited_mix_df)
+    st.session_state["sales_mix_store"] = cleaned_mix
+    mix_totals = sales_mix_with_totals(cleaned_mix, inputs["caida_precios_pct"])
+    unidades_mix = int(mix_totals["Unidades"].sum()) if not mix_totals.empty else 0
+    m2_mix = float(mix_totals["m² vendibles línea"].sum()) if not mix_totals.empty else 0.0
+    weighted_price = (float(mix_totals["Ingresos brutos línea (€)"].sum()) / unidades_mix) if unidades_mix else 0.0
+    c_mix_1, c_mix_2, c_mix_3, c_mix_4 = st.columns(4)
+    c_mix_1.metric("Unidades en mix", str(unidades_mix))
+    c_mix_2.metric("Ingresos netos viviendas", eur(float(mix_totals["Ingresos netos línea (€)"].sum()) if not mix_totals.empty else 0.0))
+    c_mix_3.metric("m² vendibles en mix", f"{m2_mix:,.0f} m²".replace(",", "."))
+    c_mix_4.metric("Precio medio vivienda", eur(weighted_price))
+    if unidades_mix != inputs["num_viviendas"]:
+        st.warning(f"El mix suma {unidades_mix} viviendas y el input maestro marca {inputs['num_viviendas']}. Ajusta uno de los dos para evitar incoherencias.")
+    if abs(m2_mix - inputs["sup_vendible_m2"]) > 0.5:
+        st.warning(f"El mix suma {fmt_es_number(m2_mix, 0)} m² vendibles y el input maestro marca {fmt_es_number(inputs['sup_vendible_m2'], 0)} m².")
+    mix_show = mix_totals.copy()
+    for col in ["Precio unitario (€)", "Ingresos brutos línea (€)", "Ingresos netos línea (€)"]:
+        mix_show[col] = mix_show[col].map(eur)
+    mix_show["m² vendibles/ud"] = mix_show["m² vendibles/ud"].map(lambda x: f"{safe_float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    mix_show["m² vendibles línea"] = mix_show["m² vendibles línea"].map(lambda x: f"{safe_float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    st.dataframe(display_df(mix_show), width="stretch", hide_index=True)
 
 with tab2:
     st.subheader("Costes editables")
@@ -850,7 +950,7 @@ with tab1:
     row2[2].metric("€ / m² venta vendible", eur_m2(model["precio_m2_venta_vendible"]))
     row2[3].metric("€ / m² margen vendible", eur_m2(model["margen_m2_vendible"]))
     row2[4].metric("Riesgo global", global_risk)
-    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["PEM referencia", eur(inputs["pem"])],["Preset de producto", inputs["program_preset"]],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes venta 4 viviendas", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
+    ficha = pd.DataFrame([["Activo", inputs["activo"]],["Referencia catastral", inputs["referencia_catastral"]],["PEM referencia", eur(inputs["pem"])],["Nº viviendas", str(inputs["num_viviendas"])],["Mes licencia", str(inputs["mes_licencia"])],["Mes inicio obra", str(inputs["mes_inicio_obra"])],["Mes primera venta", str(inputs["mes_venta_4v"])],["Mes entrega / escrituras", str(inputs["mes_entrega"])]], columns=["Campo","Valor"])
     st.dataframe(display_df(ficha), width="stretch", hide_index=True)
     st.subheader("Dictamen automático")
     if dictamen_titulo == "Viable":
@@ -884,6 +984,13 @@ with tab4:
 
 with tab5:
     st.subheader("Resumen económico")
+    mix_resumen = model["sales_mix_df"][["Tipología", "Unidades", "Precio unitario (€)", "Ingresos netos línea (€)", "m² vendibles línea"]].copy() if not model["sales_mix_df"].empty else pd.DataFrame()
+    if not mix_resumen.empty:
+        mix_resumen["Precio unitario (€)"] = mix_resumen["Precio unitario (€)"].map(eur)
+        mix_resumen["Ingresos netos línea (€)"] = mix_resumen["Ingresos netos línea (€)"].map(eur)
+        mix_resumen["m² vendibles línea"] = mix_resumen["m² vendibles línea"].map(lambda x: f"{safe_float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        st.caption("El ingreso de viviendas se calcula desde el mix comercial, no desde un único precio medio.")
+        st.dataframe(display_df(mix_resumen), width="stretch", hide_index=True)
     ingresos_df = pd.DataFrame([
         ["Viviendas", model["ingresos_viviendas"], model["ingresos_viviendas"] / inputs["pem"] if inputs["pem"] else 0.0],
         ["Garajes", model["ingresos_garajes"], model["ingresos_garajes"] / inputs["pem"] if inputs["pem"] else 0.0],
@@ -946,7 +1053,8 @@ with tab8:
         {"Concepto": "Trasteros", "Importe (€)": model["ingresos_trasteros"]},
         {"Concepto": "Ingresos totales", "Importe (€)": model["ingresos_totales"]},
     ])
-    export_dfs = {"Resumen": export_resumen,"Ingresos": export_ingresos,"Costes": export_costes,"Cashflow": cashflow_df,"Riesgo": risk_df}
+    export_mix = model["sales_mix_df"].copy()
+    export_dfs = {"Resumen": export_resumen,"Ingresos": export_ingresos,"MixComercial": export_mix,"Costes": export_costes,"Cashflow": cashflow_df,"Riesgo": risk_df}
     contabilidad_adicional_df = build_additional_accounting_df(inputs["pem"])
     if not contabilidad_adicional_df.empty:
         export_dfs["Contabilidad"] = contabilidad_adicional_df[["Fase", "Hito", "Concepto", "Coste (€)", "% PEM", "Observaciones"]]
