@@ -1,5 +1,9 @@
-streamlit
-pandas
-openpyxl
-xlsxwriter
-reportlab
+streamlit>=1.32.0
+streamlit-authenticator>=0.3.3
+streamlit-aggrid>=0.3.4.post3
+pandas>=2.0.0
+openpyxl>=3.1.0
+sqlalchemy>=2.0.0
+apscheduler>=3.10.0
+bcrypt>=4.0.0
+Pillow>=10.0.0

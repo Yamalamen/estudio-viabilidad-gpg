@@ -1,5 +1,17 @@
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 .env
 .streamlit/secrets.toml
+
+# Credenciales de email (nunca subir)
+config_email.py
+
+# Base de datos local
+data/avisos.db
+data/*.db
+
+# Config de usuarios (contiene hashes de contraseñas)
+config.yaml
+

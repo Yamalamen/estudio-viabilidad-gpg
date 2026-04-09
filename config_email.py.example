@@ -1,0 +1,8 @@
+# config_email.py  — Copia este fichero como config_email.py y rellena tus datos
+# ⚠️  NUNCA subas config_email.py al repositorio (ya está en .gitignore)
+
+SMTP_SERVER    = "smtp.office365.com"
+SMTP_PORT      = 587
+EMAIL_USER     = "tu_cuenta@dominio.es"       # Cuenta de servicio Microsoft 365
+EMAIL_PASSWORD = "tu_contraseña_de_aplicacion" # Contraseña de aplicación de M365
+FROM_NAME      = "Mantenimiento Sedes Judiciales Alicante"
