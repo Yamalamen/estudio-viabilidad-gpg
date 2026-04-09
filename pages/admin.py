@@ -23,7 +23,7 @@ def render(user: dict):
     with col_title:
         st.markdown("<h2 style='color:#1E3A5F;'>⚙️ Administración</h2>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["👥 Usuarios", "📧 Configuración Email", "📋 Log de notificaciones"])
+    tabs = st.tabs(["👥 Usuarios", "📧 Configuración Email", "📋 Log de notificaciones", "📥 Importar Excel"])
 
     # ── TAB 1: Usuarios ──────────────────────────────────────────────────────────
     with tabs[0]:
@@ -128,6 +128,143 @@ FROM_NAME     = "Mantenimiento Sedes Judiciales Alicante"
             )
         else:
             st.info("Sin notificaciones registradas.")
+
+
+    # ── TAB 4: Importar Excel ────────────────────────────────────────────────────
+    with tabs[3]:
+        st.markdown("### 📥 Importar avisos desde Excel")
+        st.info(
+            "Sube tu fichero Excel con las columnas en este orden:\n\n"
+            "**A:** Aviso (Nº) · **B:** Fecha de solicitud · **C:** Generador OT · "
+            "**D:** Generador Aviso · **E:** E.S.M. · **F:** Descripción de la OT\n\n"
+            "Los avisos que ya existan en la app se omitirán automáticamente (sin duplicados)."
+        )
+
+        uploaded = st.file_uploader(
+            "Selecciona el fichero Excel",
+            type=["xlsx", "xls"],
+            help="Formato .xlsx o .xls — máximo 10 MB",
+        )
+
+        if uploaded:
+            import pandas as pd
+            try:
+                df_preview = pd.read_excel(uploaded, nrows=5)
+                st.markdown("**Vista previa (primeras 5 filas):**")
+                st.dataframe(df_preview, use_container_width=True)
+                uploaded.seek(0)  # reset buffer after preview read
+            except Exception as e:
+                st.error(f"No se pudo leer el fichero: {e}")
+                df_preview = None
+
+            if df_preview is not None:
+                if st.button("✅ Importar todos los avisos", type="primary"):
+                    with st.spinner("Importando avisos..."):
+                        resultado = _importar_desde_buffer(uploaded)
+                    st.success(
+                        f"✅ Importación completada — "
+                        f"**Importados:** {resultado['importados']} · "
+                        f"**Ya existían (omitidos):** {resultado['omitidos']} · "
+                        f"**Errores:** {resultado['errores']}"
+                    )
+                    if resultado["errores"] > 0 and resultado["detalle_errores"]:
+                        with st.expander("Ver errores"):
+                            for err in resultado["detalle_errores"]:
+                                st.warning(err)
+                    if resultado["importados"] > 0:
+                        st.info("Vuelve al Dashboard para ver los avisos importados.")
+
+
+def _importar_desde_buffer(file_buffer) -> dict:
+    """Importa avisos desde un buffer de fichero Excel (BytesIO de Streamlit)."""
+    import io
+    import re
+    import pandas as pd
+    from datetime import datetime
+    from database.db import get_connection
+
+    def _extract_sede(esm: str) -> str:
+        if not esm or pd.isna(esm):
+            return ""
+        m = re.search(r"OBRA CIVIL\s+(.+)$", str(esm).strip(), re.IGNORECASE)
+        return m.group(1).strip() if m else str(esm).strip()
+
+    def _parse_fecha(val) -> str:
+        if pd.isna(val) or val is None or str(val).strip() == "":
+            return str(datetime.today().date())
+        if hasattr(val, "strftime"):
+            return val.strftime("%Y-%m-%d")
+        s = str(val).strip()
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return s
+
+    file_buffer.seek(0)
+    df = pd.read_excel(file_buffer, header=0)
+
+    conn = get_connection()
+    c    = conn.cursor()
+
+    importados      = 0
+    omitidos        = 0
+    errores         = 0
+    detalle_errores = []
+
+    for idx, row in df.iterrows():
+        try:
+            vals = row.tolist()
+            num_aviso       = vals[0] if len(vals) > 0 else None
+            fecha_str       = vals[1] if len(vals) > 1 else None
+            generador_ot    = str(vals[2]).strip() if len(vals) > 2 and not pd.isna(vals[2]) else ""
+            generador_aviso = str(vals[3]).strip() if len(vals) > 3 and not pd.isna(vals[3]) else ""
+            esm             = str(vals[4]).strip() if len(vals) > 4 and not pd.isna(vals[4]) else ""
+            descripcion     = str(vals[5]).strip() if len(vals) > 5 and not pd.isna(vals[5]) else ""
+            estado          = str(vals[6]).strip() if len(vals) > 6 and not pd.isna(vals[6]) else "En proceso"
+            enlace_drive    = str(vals[8]).strip() if len(vals) > 8 and not pd.isna(vals[8]) else ""
+            material        = str(vals[9]).strip() if len(vals) > 9 and not pd.isna(vals[9]) else ""
+            fecha_cierre    = _parse_fecha(vals[10]) if len(vals) > 10 and not pd.isna(vals[10]) else None
+
+            if pd.isna(num_aviso) or str(num_aviso).strip() in ("", "nan", "Aviso"):
+                omitidos += 1
+                continue
+
+            num_aviso_int = int(float(str(num_aviso)))
+            fecha         = _parse_fecha(fecha_str)
+            sede          = _extract_sede(esm)
+
+            if estado not in ("En proceso", "Acabado", "Falta material"):
+                estado = "En proceso"
+
+            existing = c.execute(
+                "SELECT id FROM avisos WHERE num_aviso=?", (num_aviso_int,)
+            ).fetchone()
+            if existing:
+                omitidos += 1
+                continue
+
+            c.execute("""
+                INSERT INTO avisos
+                    (num_aviso, fecha_solicitud, generador_ot, generador_aviso,
+                     esm, sede, descripcion, estado, enlace_drive,
+                     material_necesario, fecha_cierre)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                num_aviso_int, fecha, generador_ot, generador_aviso,
+                esm, sede, descripcion, estado, enlace_drive,
+                material or None, fecha_cierre,
+            ))
+            importados += 1
+
+        except Exception as e:
+            errores += 1
+            detalle_errores.append(f"Fila {idx + 2}: {e}")
+
+    conn.commit()
+    conn.close()
+    return {"importados": importados, "omitidos": omitidos, "errores": errores, "detalle_errores": detalle_errores}
 
 
 def _add_user_to_config(username: str, nombre: str, email: str, password: str):
