@@ -1,15 +1,9 @@
 """
-Tabla de avisos con color coding usando st-aggrid.
+Tabla de avisos con color coding usando pandas Styler (compatible con todos los navegadores).
 """
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-
-try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-    AGGRID_AVAILABLE = True
-except ImportError:
-    AGGRID_AVAILABLE = False
 
 
 _ESTADO_ICONS = {
@@ -64,107 +58,48 @@ def render_tabla(avisos: list) -> dict | None:
 
     # Renombrar columnas para UI
     rename_map = {
-        "num_aviso":           "Aviso",
-        "fecha_solicitud":     "Fecha solicitud",
-        "sede":                "Sede",
-        "generador_ot":        "Generador OT",
-        "generador_aviso":     "Generador Aviso",
-        "esm":                 "E.S.M.",
-        "descripcion":         "Descripción",
-        "estado":              "Estado",
-        "coordinador_nombre":  "Coordinador",
-        "enlace_drive":        "Drive",
-        "fecha_cierre":        "Fecha cierre",
+        "num_aviso":          "Aviso",
+        "fecha_solicitud":    "Fecha",
+        "sede":               "Sede",
+        "generador_ot":       "Generador OT",
+        "generador_aviso":    "Generador Aviso",
+        "esm":                "E.S.M.",
+        "descripcion":        "Descripción",
+        "estado":             "Estado",
+        "coordinador_nombre": "Coordinador",
+        "enlace_drive":       "Drive",
+        "fecha_cierre":       "Fecha cierre",
     }
     df_show.rename(columns=rename_map, inplace=True)
-
-    # Días abierto
     df_show["Días"] = df["fecha_solicitud"].apply(_dias_abierto)
 
-    # Color por fila
-    df_show["_color"] = [_calcular_color_hex(av) for av in avisos]
-    df_show["_id"]    = [av["id"] for av in avisos]
-
-    if AGGRID_AVAILABLE:
-        return _render_aggrid(df_show, avisos)
-    else:
-        return _render_fallback(df_show, avisos)
-
-
-def _render_aggrid(df_show: pd.DataFrame, avisos: list) -> dict | None:
-    gb = GridOptionsBuilder.from_dataframe(df_show.drop(columns=["_color", "_id"]))
-    gb.configure_selection("single", use_checkbox=False)
-    gb.configure_default_column(resizable=True, sortable=True, filter=True)
-    gb.configure_column("Aviso",         width=90,  pinned="left")
-    gb.configure_column("Fecha solicitud", width=130)
-    gb.configure_column("Sede",          width=160)
-    gb.configure_column("Estado",        width=150)
-    gb.configure_column("Descripción",   width=320, wrapText=True, autoHeight=True)
-    gb.configure_column("E.S.M.",        width=300)
-    gb.configure_column("Coordinador",   width=140)
-    gb.configure_column("Días",          width=70)
-    gb.configure_column("Drive",         width=80)
-    gb.configure_column("Fecha cierre",  width=120)
-    gb.configure_grid_options(rowHeight=36)
-
-    # Aplicar color de fondo a cada fila usando cellStyle
-    color_js = JsCode("""
-    function(params) {
-        const colors = %s;
-        const idx = params.rowIndex;
-        if (colors[idx]) {
-            return { 'background-color': colors[idx], 'color': '#1A1A2E' };
-        }
-        return {};
-    }
-    """ % str(df_show["_color"].tolist()))
-
-    for col in df_show.columns:
-        if col not in ("_color", "_id"):
-            gb.configure_column(col, cellStyle=color_js)
-
-    go = gb.build()
-    result = AgGrid(
-        df_show.drop(columns=["_color", "_id"]),
-        gridOptions=go,
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-        allow_unsafe_jscode=True,
-        height=520,
-        use_container_width=True,
-        theme="streamlit",
-    )
-
-    selected = result.get("selected_rows")
-    if selected is not None and len(selected) > 0:
-        sel_row = selected[0] if hasattr(selected, "__getitem__") else selected.iloc[0].to_dict()
-        num = sel_row.get("Aviso")
-        if num:
-            for av in avisos:
-                if av["num_aviso"] == num:
-                    return av
-    return None
-
-
-def _render_fallback(df_show: pd.DataFrame, avisos: list) -> dict | None:
-    """Tabla simple con color via Styler cuando AgGrid no está disponible."""
+    # Colores por fila
+    colors = [_calcular_color_hex(av) for av in avisos]
 
     def _style_row(row):
-        color = df_show.loc[row.name, "_color"]
+        color = colors[row.name]
         return [f"background-color: {color}; color: #1A1A2E"] * len(row)
 
-    styled = (
-        df_show.drop(columns=["_color", "_id"])
-        .style.apply(_style_row, axis=1)
-    )
-    st.dataframe(styled, use_container_width=True, height=500)
+    styled = df_show.style.apply(_style_row, axis=1)
 
-    # Selector manual
-    num_aviso_sel = st.selectbox(
-        "Selecciona un aviso para ver detalles:",
-        options=[av["num_aviso"] for av in avisos],
-        format_func=lambda n: f"#{n} — {next((a['sede'] for a in avisos if a['num_aviso']==n), '')}",
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        height=550,
+        hide_index=True,
     )
-    for av in avisos:
-        if av["num_aviso"] == num_aviso_sel:
-            return av
+
+    # Selector para abrir el detalle
+    st.markdown("**Selecciona un aviso para ver detalles:**")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        opciones = [f"#{av['num_aviso']} — {av.get('sede','?')} — {av.get('estado','?')}" for av in avisos]
+        seleccion = st.selectbox("Aviso", ["— elige uno —"] + opciones, label_visibility="collapsed")
+    with col2:
+        abrir = st.button("📂 Abrir aviso", type="primary", use_container_width=True)
+
+    if abrir and seleccion != "— elige uno —":
+        idx = opciones.index(seleccion)
+        return avisos[idx]
+
     return None
