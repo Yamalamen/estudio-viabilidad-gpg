@@ -1,38 +1,20 @@
 """
-Página principal: Dashboard con métricas, filtros y tabla de avisos.
-Dos pestañas: En curso / Terminados. Filtro por color/urgencia.
+Dashboard simplificado y robusto.
+Lee directamente los avisos y los muestra sin depender de componentes
+que puedan estar ocultando o filtrando registros.
 """
+
 import streamlit as st
-from datetime import datetime, date
+import pandas as pd
+from datetime import datetime
 from services.avisos import get_all_avisos, get_stats
 from services.excel_sync import generate_excel
-from components.filtros import render_filtros
-from components.tabla_avisos import render_tabla
-from components.notif_badge import render_notif_badge
 
 
-def _color_aviso(av: dict) -> str:
-    """Devuelve 'red', 'orange', 'blue' o 'green' según antigüedad/estado."""
-    if av.get("estado") == "Acabado":
-        return "green"
-    try:
-        fecha = datetime.strptime(str(av["fecha_solicitud"])[:10], "%Y-%m-%d").date()
-        dias  = (date.today() - fecha).days
-    except Exception:
-        return "blue"
-    if dias > 90:
-        return "red"
-    if dias > 60:
-        return "orange"
-    return "blue"
-
-
-_COLOR_MAP = {
-    "🔴 Rojo (más de 3 meses)": "red",
-    "🟠 Naranja (más de 2 meses)": "orange",
-    "🔵 Azul (en plazo)": "blue",
-    "🟢 Verde (acabado)": "green",
-}
+def _safe_text(v):
+    if v is None:
+        return ""
+    return str(v)
 
 
 def render(user: dict):
@@ -42,78 +24,128 @@ def render(user: dict):
         unsafe_allow_html=True,
     )
 
-    # ── Métricas ─────────────────────────────────────────────────────────────────
+    # ── Métricas ───────────────────────────────────────────────────────────────
     stats = get_stats()
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📋 Total avisos",        stats["total"])
-    c2.metric("🔵 En proceso",           stats["en_proceso"])
-    c3.metric("🟡 Falta material",       stats["falta_material"])
-    c4.metric("🟢 Acabados",             stats["acabado"])
-    c5.metric("🔴 Urgentes (+3 meses)",  stats["urgentes"])
+    c1.metric("📋 Total avisos", stats["total"])
+    c2.metric("🔵 En proceso", stats["en_proceso"])
+    c3.metric("🟡 Falta material", stats["falta_material"])
+    c4.metric("🟢 Acabados", stats["acabado"])
+    c5.metric("🔴 Urgentes (+3 meses)", stats["urgentes"])
 
     st.markdown("---")
 
-    with st.expander("🎨 Leyenda de colores", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-        col1.markdown("<div style='background:#FFC7CE;padding:8px;border-radius:4px;text-align:center;'><b>🔴 Rojo</b><br>Más de 3 meses</div>", unsafe_allow_html=True)
-        col2.markdown("<div style='background:#FFD966;padding:8px;border-radius:4px;text-align:center;'><b>🟠 Naranja</b><br>Más de 2 meses</div>", unsafe_allow_html=True)
-        col3.markdown("<div style='background:#BDD7EE;padding:8px;border-radius:4px;text-align:center;'><b>🔵 Azul</b><br>Dentro del plazo</div>", unsafe_allow_html=True)
-        col4.markdown("<div style='background:#C6EFCE;padding:8px;border-radius:4px;text-align:center;'><b>🟢 Verde</b><br>Acabado/Cerrado</div>", unsafe_allow_html=True)
+    # ── Descargar Excel ────────────────────────────────────────────────────────
+    excel_bytes = generate_excel()
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    st.download_button(
+        label="📥 Descargar Excel",
+        data=excel_bytes,
+        file_name=f"avisos_mantenimiento_{ts}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+    )
 
-    # ── Sidebar ───────────────────────────────────────────────────────────────────
-    render_notif_badge(user["id"])
-    filters = render_filtros(role=user["role"])
+    st.markdown("---")
 
-    with st.sidebar:
-        st.divider()
-        if user["role"] == "supervisor":
-            if st.button("➕ Nuevo aviso", use_container_width=True, type="primary"):
-                st.session_state["page"] = "crear_aviso"
-                st.rerun()
+    # ── Leer todos los avisos SIN filtros ocultos ─────────────────────────────
+    avisos_todos = get_all_avisos(filters={})
 
-        excel_bytes = generate_excel()
-        ts = datetime.now().strftime("%Y%m%d_%H%M")
-        st.download_button(
-            label="📥 Descargar Excel",
-            data=excel_bytes,
-            file_name=f"avisos_mantenimiento_{ts}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+    st.write(f"Total avisos recibidos por el dashboard: **{len(avisos_todos)}**")
+
+    if not avisos_todos:
+        st.warning("No hay avisos para mostrar.")
+        return
+
+    # ── Filtros simples y visibles ────────────────────────────────────────────
+    colf1, colf2, colf3 = st.columns(3)
+
+    with colf1:
+        busqueda = st.text_input("Buscar por nº aviso, sede, E.S.M. o descripción")
+
+    with colf2:
+        estados_disponibles = sorted(
+            list({(_safe_text(a.get("estado")) or "Pendiente") for a in avisos_todos})
         )
+        filtro_estado = st.selectbox("Filtrar por estado", ["Todos"] + estados_disponibles)
 
-    # ── Obtener y filtrar avisos ──────────────────────────────────────────────────
-    # Extraer filtro de colores (no va a la BD, se aplica en Python)
-    colores_filtro = filters.pop("colores", None)
-    avisos_todos   = get_all_avisos(filters=filters)
+    with colf3:
+        filtro_lista = st.selectbox("Mostrar", ["En curso", "Terminados", "Todos"], index=0)
 
-    # Aplicar filtro de color si está activo
-    if colores_filtro:
-        colores_activos = {_COLOR_MAP[c] for c in colores_filtro}
-        avisos_todos    = [a for a in avisos_todos if _color_aviso(a) in colores_activos]
+    avisos_filtrados = avisos_todos[:]
 
-    en_curso   = [a for a in avisos_todos if a["estado"] != "Acabado"]
-    terminados = [a for a in avisos_todos if a["estado"] == "Acabado"]
+    if filtro_estado != "Todos":
+        avisos_filtrados = [
+            a for a in avisos_filtrados
+            if _safe_text(a.get("estado")) == filtro_estado
+        ]
 
-    # ── Pestañas ──────────────────────────────────────────────────────────────────
-    tab_curso, tab_term = st.tabs([
-        f"📋 En curso  ({len(en_curso)})",
-        f"✅ Terminados  ({len(terminados)})",
-    ])
+    if filtro_lista == "En curso":
+        avisos_filtrados = [
+            a for a in avisos_filtrados
+            if _safe_text(a.get("estado")) != "Acabado"
+        ]
+    elif filtro_lista == "Terminados":
+        avisos_filtrados = [
+            a for a in avisos_filtrados
+            if _safe_text(a.get("estado")) == "Acabado"
+        ]
 
-    with tab_curso:
-        if en_curso:
-            st.caption("Selecciona un aviso y pulsa 'Abrir' para ver detalles o cambiar su estado.")
-        selected = render_tabla(en_curso, key_suffix="curso")
-        if selected:
-            st.session_state["aviso_seleccionado_id"] = selected["id"]
-            st.session_state["page"] = "detalle_aviso"
-            st.rerun()
+    if busqueda.strip():
+        q = busqueda.strip().lower()
+        avisos_filtrados = [
+            a for a in avisos_filtrados
+            if q in _safe_text(a.get("num_aviso")).lower()
+            or q in _safe_text(a.get("numero_aviso")).lower()
+            or q in _safe_text(a.get("sede")).lower()
+            or q in _safe_text(a.get("esm")).lower()
+            or q in _safe_text(a.get("descripcion")).lower()
+            or q in _safe_text(a.get("descripcion_ot")).lower()
+        ]
 
-    with tab_term:
-        if terminados:
-            st.caption("Avisos marcados como Acabado/Cerrado.")
-        selected = render_tabla(terminados, key_suffix="term")
-        if selected:
-            st.session_state["aviso_seleccionado_id"] = selected["id"]
+    st.write(f"Avisos visibles: **{len(avisos_filtrados)}**")
+
+    if not avisos_filtrados:
+        st.info("No hay avisos con los filtros actuales.")
+        return
+
+    # ── Preparar tabla visible ────────────────────────────────────────────────
+    filas = []
+    for a in avisos_filtrados:
+        filas.append({
+            "ID": a.get("id"),
+            "Aviso": a.get("num_aviso") or a.get("numero_aviso"),
+            "Fecha": a.get("fecha_solicitud"),
+            "Sede": a.get("sede"),
+            "Estado": a.get("estado"),
+            "Coordinador": a.get("coordinador_nombre") or a.get("coordinador") or "",
+            "E.S.M.": a.get("esm"),
+            "Descripción": a.get("descripcion") or a.get("descripcion_ot") or "",
+        })
+
+    df = pd.DataFrame(filas)
+
+    st.dataframe(df, use_container_width=True, height=500)
+
+    # ── Selector de aviso ─────────────────────────────────────────────────────
+    st.markdown("### Abrir aviso")
+
+    opciones = []
+    mapa = {}
+
+    for a in avisos_filtrados:
+        aviso_num = a.get("num_aviso") or a.get("numero_aviso") or ""
+        sede = a.get("sede") or ""
+        estado = a.get("estado") or ""
+        texto = f"{aviso_num} | {sede} | {estado}"
+        opciones.append(texto)
+        mapa[texto] = a.get("id")
+
+    seleccion = st.selectbox("Selecciona un aviso", options=opciones)
+
+    if st.button("📂 Abrir aviso", type="primary"):
+        aviso_id = mapa.get(seleccion)
+        if aviso_id:
+            st.session_state["aviso_seleccionado_id"] = aviso_id
             st.session_state["page"] = "detalle_aviso"
             st.rerun()
