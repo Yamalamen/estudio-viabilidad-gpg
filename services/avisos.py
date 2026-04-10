@@ -1,21 +1,13 @@
 """
 CRUD y consultas de avisos.
-Versión unificada y compatible con la importación nueva de Administración
-y con el Dashboard / Detalle actuales.
-
-Objetivo:
-- Leer y escribir siempre sobre la tabla `avisos`
-- Ser compatible con columnas antiguas y nuevas
-- Devolver al frontend las claves que espera:
-  id, num_aviso, descripcion, coordinador_id, material_necesario, etc.
+Versión unificada y compatible con Supabase/PostgreSQL.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import create_engine, inspect, text
 
@@ -25,10 +17,6 @@ from sqlalchemy import create_engine, inspect, text
 # -----------------------------------------------------------------------------
 
 def _get_engine():
-    """
-    Reutiliza el engine principal si existe.
-    Si no existe, lo crea desde DATABASE_URL o como último recurso en SQLite local.
-    """
     try:
         from database import db as db_module
 
@@ -76,33 +64,25 @@ def _has_col(table_name: str, column_name: str) -> bool:
 
 
 def _safe_add_column(table_name: str, column_name: str, column_sql: str) -> None:
-    """
-    Añade una columna si no existe.
-    Compatible con PostgreSQL / SQLite usando inspección previa.
-    """
     if _has_col(table_name, column_name):
         return
-
-    ddl = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"
     with ENGINE.begin() as conn:
-        conn.execute(text(ddl))
+        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
 def _ensure_schema() -> None:
-    """
-    Asegura que la tabla avisos existe y que tiene las columnas necesarias
-    para que Dashboard, Detalle y Administración trabajen sobre la misma base.
-    """
     if not _has_table("avisos"):
         ddl = """
         CREATE TABLE IF NOT EXISTS avisos (
             id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             numero_aviso VARCHAR(100) UNIQUE NOT NULL,
+            num_aviso VARCHAR(100),
             fecha_solicitud DATE NULL,
             generador_ot TEXT NULL,
             generador_aviso TEXT NULL,
             esm TEXT NULL,
             descripcion_ot TEXT NULL,
+            descripcion TEXT NULL,
             sede TEXT NULL,
             estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente',
             coordinador VARCHAR(100) NULL,
@@ -122,7 +102,6 @@ def _ensure_schema() -> None:
             conn.execute(text(ddl))
         return
 
-    # Si ya existe, completamos columnas faltantes
     _safe_add_column("avisos", "numero_aviso", "VARCHAR(100)")
     _safe_add_column("avisos", "num_aviso", "VARCHAR(100)")
     _safe_add_column("avisos", "descripcion_ot", "TEXT")
@@ -145,11 +124,6 @@ def _ensure_schema() -> None:
 # -----------------------------------------------------------------------------
 
 def _extract_sede(esm: str) -> str:
-    """
-    Extrae la sede del código ESM.
-    Ejemplo:
-    'JUSTICIA.AL.AL30.860-GENERICO OBRA CIVIL ELCHE' -> 'ELCHE'
-    """
     if not esm:
         return ""
     m = re.search(r"OBRA CIVIL\s+(.+)$", str(esm).strip(), re.IGNORECASE)
@@ -162,23 +136,17 @@ def _extract_sede(esm: str) -> str:
 
 def _col_num() -> str:
     cols = _get_columns("avisos")
-    if "numero_aviso" in cols:
-        return "numero_aviso"
-    return "num_aviso"
+    return "numero_aviso" if "numero_aviso" in cols else "num_aviso"
 
 
 def _col_desc() -> str:
     cols = _get_columns("avisos")
-    if "descripcion_ot" in cols:
-        return "descripcion_ot"
-    return "descripcion"
+    return "descripcion_ot" if "descripcion_ot" in cols else "descripcion"
 
 
 def _col_material() -> str:
     cols = _get_columns("avisos")
-    if "material_faltante" in cols:
-        return "material_faltante"
-    return "material_necesario"
+    return "material_faltante" if "material_faltante" in cols else "material_necesario"
 
 
 def _row_to_dict(row) -> dict:
@@ -190,12 +158,7 @@ def _row_to_dict(row) -> dict:
 
 
 def _row_to_aviso(row: Any) -> Dict[str, Any]:
-    """
-    Normaliza una fila de BD para que el resto de la app reciba SIEMPRE
-    las mismas claves, independientemente del nombre real de columnas en BD.
-    """
     d = _row_to_dict(row)
-
     num_aviso = d.get("numero_aviso", d.get("num_aviso"))
     descripcion = d.get("descripcion_ot", d.get("descripcion"))
     material = d.get("material_faltante", d.get("material_necesario"))
@@ -228,20 +191,16 @@ def _row_to_aviso(row: Any) -> Dict[str, Any]:
 
 
 def _get_user_name_by_id(user_id: Optional[int]) -> Optional[str]:
-    if not user_id:
+    if not user_id or not _has_table("users"):
         return None
-    if not _has_table("users"):
-        return None
-
     with ENGINE.begin() as conn:
         row = conn.execute(
             text("SELECT nombre FROM users WHERE id = :id"),
             {"id": user_id},
         ).fetchone()
-        if not row:
-            return None
-        r = _row_to_dict(row)
-        return r.get("nombre")
+    if not row:
+        return None
+    return _row_to_dict(row).get("nombre")
 
 
 # -----------------------------------------------------------------------------
@@ -249,10 +208,6 @@ def _get_user_name_by_id(user_id: Optional[int]) -> Optional[str]:
 # -----------------------------------------------------------------------------
 
 def get_all_avisos(filters: dict | None = None) -> list:
-    """
-    Devuelve todos los avisos con datos del coordinador.
-    Compatible con filtros y con el esquema nuevo/antiguo.
-    """
     _ensure_schema()
 
     num_col = _col_num()
@@ -260,7 +215,7 @@ def get_all_avisos(filters: dict | None = None) -> list:
     material_col = _col_material()
     has_users = _has_table("users") and _has_col("avisos", "coordinador_id")
 
-    select_sql = f"""
+    sql = f"""
         SELECT
             a.id,
             a.{num_col} AS numero_aviso,
@@ -285,81 +240,79 @@ def get_all_avisos(filters: dict | None = None) -> list:
         {"LEFT JOIN users u ON a.coordinador_id = u.id" if has_users else ""}
         WHERE 1=1
     """
-
     params: dict[str, Any] = {}
 
     if filters:
         if filters.get("num_aviso"):
-            select_sql += f" AND CAST(a.{num_col} AS TEXT) = :num_aviso"
+            sql += f" AND CAST(a.{num_col} AS TEXT) = :num_aviso"
             params["num_aviso"] = str(filters["num_aviso"]).strip()
 
         if filters.get("sede"):
-            select_sql += " AND a.sede = :sede"
+            sql += " AND a.sede = :sede"
             params["sede"] = filters["sede"]
 
         if filters.get("estado"):
-            select_sql += " AND a.estado = :estado"
+            sql += " AND a.estado = :estado"
             params["estado"] = filters["estado"]
 
         if filters.get("coordinador_id") and _has_col("avisos", "coordinador_id"):
-            select_sql += " AND a.coordinador_id = :coordinador_id"
+            sql += " AND a.coordinador_id = :coordinador_id"
             params["coordinador_id"] = filters["coordinador_id"]
 
         if filters.get("fecha_desde"):
-            select_sql += " AND a.fecha_solicitud >= :fecha_desde"
+            sql += " AND CAST(a.fecha_solicitud AS DATE) >= :fecha_desde"
             params["fecha_desde"] = str(filters["fecha_desde"])
 
         if filters.get("fecha_hasta"):
-            select_sql += " AND a.fecha_solicitud <= :fecha_hasta"
+            sql += " AND CAST(a.fecha_solicitud AS DATE) <= :fecha_hasta"
             params["fecha_hasta"] = str(filters["fecha_hasta"])
 
         if filters.get("generador_ot"):
-            select_sql += " AND LOWER(COALESCE(a.generador_ot,'')) LIKE :generador_ot"
+            sql += " AND LOWER(COALESCE(a.generador_ot,'')) LIKE :generador_ot"
             params["generador_ot"] = f"%{str(filters['generador_ot']).lower()}%"
 
         if filters.get("generador_aviso"):
-            select_sql += " AND LOWER(COALESCE(a.generador_aviso,'')) LIKE :generador_aviso"
+            sql += " AND LOWER(COALESCE(a.generador_aviso,'')) LIKE :generador_aviso"
             params["generador_aviso"] = f"%{str(filters['generador_aviso']).lower()}%"
 
         if filters.get("esm"):
-            select_sql += " AND LOWER(COALESCE(a.esm,'')) LIKE :esm"
+            sql += " AND LOWER(COALESCE(a.esm,'')) LIKE :esm"
             params["esm"] = f"%{str(filters['esm']).lower()}%"
 
         if filters.get("descripcion"):
-            select_sql += f" AND LOWER(COALESCE(a.{desc_col},'')) LIKE :descripcion"
+            sql += f" AND LOWER(COALESCE(a.{desc_col},'')) LIKE :descripcion"
             params["descripcion"] = f"%{str(filters['descripcion']).lower()}%"
 
-        # filtro color / urgencia
         if filters.get("color"):
             color = str(filters["color"]).lower()
             if color == "rojo":
-                select_sql += """
-                    AND a.estado <> 'Acabado'
+                sql += """
+                    AND COALESCE(a.estado, 'Pendiente') <> 'Acabado'
                     AND a.fecha_solicitud IS NOT NULL
-                    AND CURRENT_DATE - a.fecha_solicitud > 90
+                    AND (CURRENT_DATE - CAST(a.fecha_solicitud AS DATE)) > 90
                 """
             elif color == "naranja":
-                select_sql += """
-                    AND a.estado <> 'Acabado'
+                sql += """
+                    AND COALESCE(a.estado, 'Pendiente') <> 'Acabado'
                     AND a.fecha_solicitud IS NOT NULL
-                    AND CURRENT_DATE - a.fecha_solicitud > 60
-                    AND CURRENT_DATE - a.fecha_solicitud <= 90
+                    AND (CURRENT_DATE - CAST(a.fecha_solicitud AS DATE)) > 60
+                    AND (CURRENT_DATE - CAST(a.fecha_solicitud AS DATE)) <= 90
                 """
             elif color == "azul":
-                select_sql += """
-                    AND a.estado <> 'Acabado'
+                sql += """
+                    AND COALESCE(a.estado, 'Pendiente') <> 'Acabado'
                     AND (
                         a.fecha_solicitud IS NULL
-                        OR CURRENT_DATE - a.fecha_solicitud <= 60
+                        OR (CURRENT_DATE - CAST(a.fecha_solicitud AS DATE)) <= 60
                     )
                 """
             elif color == "verde":
-                select_sql += " AND a.estado = 'Acabado'"
+                sql += " AND a.estado = 'Acabado'"
 
-    select_sql += f" ORDER BY a.fecha_solicitud DESC NULLS LAST, a.{num_col} DESC"
+    sql += f" ORDER BY CAST(a.fecha_solicitud AS DATE) DESC NULLS LAST, CAST(a.{num_col} AS TEXT) DESC"
 
     with ENGINE.begin() as conn:
-        rows = conn.execute(text(select_sql), params).fetchall()
+        rows = conn.execute(text(sql), params).fetchall()
 
     return [_row_to_aviso(r) for r in rows]
 
@@ -485,7 +438,6 @@ def update_aviso(aviso_id: int, data: dict) -> bool:
     fields = []
     params: dict[str, Any] = {"id": aviso_id}
 
-    # mapeo lógico -> columna real
     mapping = {
         "fecha_solicitud": "fecha_solicitud",
         "generador_ot": "generador_ot",
@@ -511,7 +463,6 @@ def update_aviso(aviso_id: int, data: dict) -> bool:
             fields.append(f"{real_col} = :{key}")
             params[key] = data[key]
 
-    # Si cambia coordinador_id, sincronizamos también el nombre de coordinador
     if "coordinador_id" in data and _has_col("avisos", "coordinador"):
         coord_name = _get_user_name_by_id(data.get("coordinador_id"))
         fields.append("coordinador = :coordinador_nombre_sync")
@@ -538,22 +489,17 @@ def get_sedes() -> list:
         return []
 
     with ENGINE.begin() as conn:
-        rows = conn.execute(
-            text("""
-                SELECT DISTINCT sede
-                FROM avisos
-                WHERE sede IS NOT NULL AND TRIM(CAST(sede AS TEXT)) <> ''
-                ORDER BY sede
-            """)
-        ).fetchall()
+        rows = conn.execute(text("""
+            SELECT DISTINCT sede
+            FROM avisos
+            WHERE sede IS NOT NULL AND TRIM(CAST(sede AS TEXT)) <> ''
+            ORDER BY sede
+        """)).fetchall()
 
-    return [(_row_to_dict(r).get("sede")) for r in rows if _row_to_dict(r).get("sede")]
+    return [_row_to_dict(r).get("sede") for r in rows if _row_to_dict(r).get("sede")]
 
 
 def get_avisos_por_alertar(dias: int) -> list:
-    """
-    Devuelve avisos no acabados con X+ días de antigüedad cuya alerta no se ha enviado.
-    """
     _ensure_schema()
 
     field = "alerta_1mes_enviada" if dias <= 31 else "alerta_3meses_enviada"
@@ -588,7 +534,7 @@ def get_avisos_por_alertar(dias: int) -> list:
         WHERE COALESCE(a.estado, 'Pendiente') <> 'Acabado'
           AND COALESCE(a.{field}, FALSE) = FALSE
           AND a.fecha_solicitud IS NOT NULL
-          AND CURRENT_DATE - a.fecha_solicitud >= :dias
+          AND (CURRENT_DATE - CAST(a.fecha_solicitud AS DATE)) >= :dias
     """
 
     with ENGINE.begin() as conn:
@@ -612,50 +558,39 @@ def marcar_alerta_enviada(aviso_id: int, tipo: str):
 
 
 def get_stats() -> dict:
-    """
-    Estadísticas del dashboard.
-    Importante:
-    - 'En proceso' incluye también 'Pendiente'
-    - 'Urgentes' = no acabados y > 90 días
-    """
     _ensure_schema()
 
     with ENGINE.begin() as conn:
-        total = conn.execute(text("SELECT COUNT(*) AS n FROM avisos")).scalar() or 0
+        total = conn.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM avisos
+        """)).scalar() or 0
 
-        en_proceso = conn.execute(
-            text("""
-                SELECT COUNT(*) AS n
-                FROM avisos
-                WHERE COALESCE(estado, 'Pendiente') IN ('En proceso', 'Pendiente')
-            """)
-        ).scalar() or 0
+        en_proceso = conn.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM avisos
+            WHERE COALESCE(estado, 'Pendiente') IN ('En proceso', 'Pendiente')
+        """)).scalar() or 0
 
-        acabado = conn.execute(
-            text("""
-                SELECT COUNT(*) AS n
-                FROM avisos
-                WHERE estado = 'Acabado'
-            """)
-        ).scalar() or 0
+        acabado = conn.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM avisos
+            WHERE estado = 'Acabado'
+        """)).scalar() or 0
 
-        falta_material = conn.execute(
-            text("""
-                SELECT COUNT(*) AS n
-                FROM avisos
-                WHERE estado = 'Falta material'
-            """)
-        ).scalar() or 0
+        falta_material = conn.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM avisos
+            WHERE estado = 'Falta material'
+        """)).scalar() or 0
 
-        urgentes = conn.execute(
-            text("""
-                SELECT COUNT(*) AS n
-                FROM avisos
-                WHERE COALESCE(estado, 'Pendiente') <> 'Acabado'
-                  AND fecha_solicitud IS NOT NULL
-                  AND CURRENT_DATE - fecha_solicitud > 90
-            """)
-        ).scalar() or 0
+        urgentes = conn.execute(text("""
+            SELECT COUNT(*) AS n
+            FROM avisos
+            WHERE COALESCE(estado, 'Pendiente') <> 'Acabado'
+              AND fecha_solicitud IS NOT NULL
+              AND (CURRENT_DATE - CAST(fecha_solicitud AS DATE)) > 90
+        """)).scalar() or 0
 
     return {
         "total": int(total),
