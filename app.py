@@ -4,7 +4,7 @@ Sedes Judiciales — Provincia de Alicante
 
 Punto de entrada principal con autenticación y routing de páginas.
 """
-
+# stdlib imports
 import sys
 import os
 from pathlib import Path
