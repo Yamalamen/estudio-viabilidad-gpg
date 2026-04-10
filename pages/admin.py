@@ -107,20 +107,20 @@ FROM_NAME     = "Mantenimiento Sedes Judiciales Alicante"
     # ── TAB 3: Log de notificaciones ─────────────────────────────────────────────
     with tabs[2]:
         st.markdown("### Log de todas las notificaciones")
-        conn = get_connection()
-        rows = conn.execute("""
-            SELECT n.*, u.nombre AS usuario_nombre, a.num_aviso
-            FROM notificaciones n
-            JOIN users u ON n.user_id = u.id
-            LEFT JOIN avisos a ON n.aviso_id = a.id
-            ORDER BY n.fecha_creacion DESC
-            LIMIT 200
-        """).fetchall()
-        conn.close()
+        from sqlalchemy import text as _text
+        with get_connection() as _conn:
+            rows = _conn.execute(_text("""
+                SELECT n.*, u.nombre AS usuario_nombre, a.num_aviso
+                FROM notificaciones n
+                JOIN users u ON n.user_id = u.id
+                LEFT JOIN avisos a ON n.aviso_id = a.id
+                ORDER BY n.fecha_creacion DESC
+                LIMIT 200
+            """)).fetchall()
 
         if rows:
             import pandas as pd
-            df = pd.DataFrame([dict(r) for r in rows])
+            df = pd.DataFrame([dict(r._mapping) for r in rows])
             st.dataframe(
                 df[["fecha_creacion", "usuario_nombre", "num_aviso", "tipo", "mensaje", "leida"]],
                 use_container_width=True,

@@ -1,17 +1,20 @@
 """
-Panel de filtros en el sidebar.
+Panel de filtros en el sidebar — incluye filtro por color/urgencia.
 """
 import streamlit as st
-from datetime import date, timedelta
+from datetime import date
 from services.avisos import get_sedes
 from services.users import get_coordinadores
 
+_OPCIONES_COLOR = [
+    "🔴 Rojo (más de 3 meses)",
+    "🟠 Naranja (más de 2 meses)",
+    "🔵 Azul (en plazo)",
+    "🟢 Verde (acabado)",
+]
+
 
 def render_filtros(role: str = "supervisor") -> dict:
-    """
-    Renderiza el panel de filtros en el sidebar.
-    Devuelve un dict con los filtros activos.
-    """
     filters = {}
 
     with st.sidebar:
@@ -22,6 +25,15 @@ def render_filtros(role: str = "supervisor") -> dict:
         if num.strip().isdigit():
             filters["num_aviso"] = int(num.strip())
             return filters  # búsqueda directa, ignorar resto
+
+        # ── Filtro por color / urgencia ──────────────────────────────────────────
+        colores_sel = st.multiselect(
+            "Urgencia / color",
+            options=_OPCIONES_COLOR,
+            help="Filtra por antigüedad del aviso",
+        )
+        if colores_sel:
+            filters["colores"] = colores_sel
 
         # Sede
         sedes = ["Todas"] + get_sedes()
@@ -37,7 +49,7 @@ def render_filtros(role: str = "supervisor") -> dict:
 
         # Coordinador (solo supervisores)
         if role == "supervisor":
-            coords = get_coordinadores()
+            coords     = get_coordinadores()
             coord_opts = {"Todos": None}
             coord_opts.update({c["nombre"]: c["id"] for c in coords})
             coord_sel = st.selectbox("Coordinador asignado", list(coord_opts.keys()))
@@ -76,7 +88,7 @@ def render_filtros(role: str = "supervisor") -> dict:
         if desc_txt.strip():
             filters["descripcion"] = desc_txt.strip()
 
-        if st.button("🗑️ Limpiar filtros"):
+        if st.button("🗑️ Limpiar filtros", use_container_width=True):
             st.rerun()
 
     return filters

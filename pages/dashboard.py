@@ -1,14 +1,38 @@
 """
 Página principal: Dashboard con métricas, filtros y tabla de avisos.
-Dos pestañas: En curso / Terminados.
+Dos pestañas: En curso / Terminados. Filtro por color/urgencia.
 """
 import streamlit as st
+from datetime import datetime, date
 from services.avisos import get_all_avisos, get_stats
 from services.excel_sync import generate_excel
 from components.filtros import render_filtros
 from components.tabla_avisos import render_tabla
 from components.notif_badge import render_notif_badge
-from datetime import datetime
+
+
+def _color_aviso(av: dict) -> str:
+    """Devuelve 'red', 'orange', 'blue' o 'green' según antigüedad/estado."""
+    if av.get("estado") == "Acabado":
+        return "green"
+    try:
+        fecha = datetime.strptime(str(av["fecha_solicitud"])[:10], "%Y-%m-%d").date()
+        dias  = (date.today() - fecha).days
+    except Exception:
+        return "blue"
+    if dias > 90:
+        return "red"
+    if dias > 60:
+        return "orange"
+    return "blue"
+
+
+_COLOR_MAP = {
+    "🔴 Rojo (más de 3 meses)": "red",
+    "🟠 Naranja (más de 2 meses)": "orange",
+    "🔵 Azul (en plazo)": "blue",
+    "🟢 Verde (acabado)": "green",
+}
 
 
 def render(user: dict):
@@ -29,23 +53,14 @@ def render(user: dict):
 
     st.markdown("---")
 
-    # ── Leyenda de colores ────────────────────────────────────────────────────────
     with st.expander("🎨 Leyenda de colores", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(
-            "<div style='background:#FFC7CE;padding:8px;border-radius:4px;text-align:center;'>"
-            "<b>🔴 Rojo</b><br>Más de 3 meses</div>", unsafe_allow_html=True)
-        col2.markdown(
-            "<div style='background:#FFD966;padding:8px;border-radius:4px;text-align:center;'>"
-            "<b>🟠 Naranja</b><br>Más de 2 meses</div>", unsafe_allow_html=True)
-        col3.markdown(
-            "<div style='background:#BDD7EE;padding:8px;border-radius:4px;text-align:center;'>"
-            "<b>🔵 Azul</b><br>Dentro del plazo</div>", unsafe_allow_html=True)
-        col4.markdown(
-            "<div style='background:#C6EFCE;padding:8px;border-radius:4px;text-align:center;'>"
-            "<b>🟢 Verde</b><br>Acabado/Cerrado</div>", unsafe_allow_html=True)
+        col1.markdown("<div style='background:#FFC7CE;padding:8px;border-radius:4px;text-align:center;'><b>🔴 Rojo</b><br>Más de 3 meses</div>", unsafe_allow_html=True)
+        col2.markdown("<div style='background:#FFD966;padding:8px;border-radius:4px;text-align:center;'><b>🟠 Naranja</b><br>Más de 2 meses</div>", unsafe_allow_html=True)
+        col3.markdown("<div style='background:#BDD7EE;padding:8px;border-radius:4px;text-align:center;'><b>🔵 Azul</b><br>Dentro del plazo</div>", unsafe_allow_html=True)
+        col4.markdown("<div style='background:#C6EFCE;padding:8px;border-radius:4px;text-align:center;'><b>🟢 Verde</b><br>Acabado/Cerrado</div>", unsafe_allow_html=True)
 
-    # ── Sidebar: notificaciones + filtros + acciones ──────────────────────────────
+    # ── Sidebar ───────────────────────────────────────────────────────────────────
     render_notif_badge(user["id"])
     filters = render_filtros(role=user["role"])
 
@@ -66,10 +81,18 @@ def render(user: dict):
             use_container_width=True,
         )
 
-    # ── Obtener avisos y separar ──────────────────────────────────────────────────
-    avisos_todos = get_all_avisos(filters=filters)
-    en_curso     = [a for a in avisos_todos if a["estado"] != "Acabado"]
-    terminados   = [a for a in avisos_todos if a["estado"] == "Acabado"]
+    # ── Obtener y filtrar avisos ──────────────────────────────────────────────────
+    # Extraer filtro de colores (no va a la BD, se aplica en Python)
+    colores_filtro = filters.pop("colores", None)
+    avisos_todos   = get_all_avisos(filters=filters)
+
+    # Aplicar filtro de color si está activo
+    if colores_filtro:
+        colores_activos = {_COLOR_MAP[c] for c in colores_filtro}
+        avisos_todos    = [a for a in avisos_todos if _color_aviso(a) in colores_activos]
+
+    en_curso   = [a for a in avisos_todos if a["estado"] != "Acabado"]
+    terminados = [a for a in avisos_todos if a["estado"] == "Acabado"]
 
     # ── Pestañas ──────────────────────────────────────────────────────────────────
     tab_curso, tab_term = st.tabs([
@@ -79,7 +102,7 @@ def render(user: dict):
 
     with tab_curso:
         if en_curso:
-            st.caption("Haz clic en un aviso del desplegable y pulsa 'Abrir aviso' para cambiar su estado.")
+            st.caption("Selecciona un aviso y pulsa 'Abrir' para ver detalles o cambiar su estado.")
         selected = render_tabla(en_curso, key_suffix="curso")
         if selected:
             st.session_state["aviso_seleccionado_id"] = selected["id"]

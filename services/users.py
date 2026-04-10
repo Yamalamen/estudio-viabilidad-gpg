@@ -1,36 +1,40 @@
 """
-Consultas de usuarios.
+Consultas de usuarios — compatible SQLite y PostgreSQL.
 """
+from sqlalchemy import text
 from database.db import get_connection
 
 
+def _row(r) -> dict:
+    return dict(r._mapping)
+
+
 def get_all_users(role: str = None) -> list:
-    conn = get_connection()
     sql = "SELECT * FROM users WHERE active=1"
-    params = []
+    params = {}
     if role:
-        sql += " AND role=?"
-        params.append(role)
+        sql += " AND role=:role"
+        params["role"] = role
     sql += " ORDER BY nombre"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    with get_connection() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+        return [_row(r) for r in rows]
 
 
 def get_user_by_username(username: str) -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM users WHERE username=?", (username,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    with get_connection() as conn:
+        row = conn.execute(text(
+            "SELECT * FROM users WHERE username=:u"
+        ), {"u": username}).fetchone()
+        return _row(row) if row else None
 
 
 def get_user_by_id(user_id: int) -> dict | None:
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    with get_connection() as conn:
+        row = conn.execute(text(
+            "SELECT * FROM users WHERE id=:id"
+        ), {"id": user_id}).fetchone()
+        return _row(row) if row else None
 
 
 def get_coordinadores() -> list:
@@ -38,36 +42,36 @@ def get_coordinadores() -> list:
 
 
 def get_laura() -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM users WHERE username='laura' AND active=1"
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    with get_connection() as conn:
+        row = conn.execute(text(
+            "SELECT * FROM users WHERE username='laura' AND active=1"
+        )).fetchone()
+        return _row(row) if row else None
 
 
 def create_user(username: str, nombre: str, email: str, role: str) -> int:
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO users (username, nombre, email, role) VALUES (?,?,?,?)",
-        (username, nombre, email, role)
-    )
-    new_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return new_id
+    with get_connection() as conn:
+        conn.execute(text(
+            "INSERT INTO users (username, nombre, email, role) VALUES (:u,:n,:e,:r)"
+        ), {"u": username, "n": nombre, "e": email, "r": role})
+        conn.commit()
+        row = conn.execute(text(
+            "SELECT id FROM users WHERE username=:u"
+        ), {"u": username}).fetchone()
+        return row._mapping["id"]
 
 
 def toggle_user_active(user_id: int, active: bool):
-    conn = get_connection()
-    conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        conn.execute(text(
+            "UPDATE users SET active=:a WHERE id=:id"
+        ), {"a": 1 if active else 0, "id": user_id})
+        conn.commit()
 
 
 def update_user_email(user_id: int, email: str):
-    conn = get_connection()
-    conn.execute("UPDATE users SET email=? WHERE id=?", (email, user_id))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        conn.execute(text(
+            "UPDATE users SET email=:e WHERE id=:id"
+        ), {"e": email, "id": user_id})
+        conn.commit()

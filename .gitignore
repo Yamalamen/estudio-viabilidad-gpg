@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .env
 .streamlit/secrets.toml
+config_email.py
 
 # Credenciales de email (nunca subir)
 config_email.py
