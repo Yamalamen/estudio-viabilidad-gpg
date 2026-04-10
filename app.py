@@ -6,7 +6,7 @@ Punto de entrada principal con autenticación y routing de páginas.
 """
 
 import sys
-import osh
+import os
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
