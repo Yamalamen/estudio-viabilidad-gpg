@@ -4,15 +4,15 @@ Página de Administración
 - Exportar avisos a Excel
 - Ver resumen rápido
 
-Versión robusta para Excel reales con encabezados raros / filas vacías.
-Compatible con PostgreSQL/Supabase vía SQLAlchemy.
+Versión robusta para Excel reales y PostgreSQL/Supabase.
+IMPORTANTE: importa fila por fila para que un error en una fila no bloquee las demás.
 """
 
 from __future__ import annotations
 
 from io import BytesIO
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Any
 
 import pandas as pd
 import streamlit as st
@@ -144,9 +144,6 @@ def _extraer_sede(esm: str) -> str:
 
 
 def _looks_like_header_row(values: List[Any]) -> bool:
-    """
-    Detecta si una fila parece la fila de encabezados.
-    """
     txt = " | ".join([_clean_str(v).lower() for v in values if _clean_str(v)])
     pistas = [
         "aviso",
@@ -164,9 +161,6 @@ def _looks_like_header_row(values: List[Any]) -> bool:
 
 
 def _find_header_row(df_raw: pd.DataFrame) -> int:
-    """
-    Busca la fila de encabezado dentro de las primeras filas.
-    """
     max_scan = min(len(df_raw), 15)
     for i in range(max_scan):
         fila = df_raw.iloc[i].tolist()
@@ -225,36 +219,21 @@ def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _leer_excel_robusto(uploaded_file) -> pd.DataFrame:
-    """
-    Lee el Excel de forma robusta:
-    1) carga sin encabezado
-    2) detecta la fila real de encabezados
-    3) limpia filas vacías
-    """
     contenido = BytesIO(uploaded_file.getvalue())
 
-    # Leer sin asumir encabezado
     df_raw = pd.read_excel(contenido, header=None)
-
     if df_raw.empty:
         return df_raw
 
     header_row = _find_header_row(df_raw)
 
-    # Volver a leer usando la fila detectada como header
     contenido.seek(0)
     df = pd.read_excel(contenido, header=header_row)
 
-    # Eliminar columnas totalmente vacías
     df = df.dropna(axis=1, how="all")
-
-    # Eliminar filas totalmente vacías
     df = df.dropna(axis=0, how="all")
-
-    # Limpiar nombres de columna
     df.columns = [str(c).strip() for c in df.columns]
 
-    # A veces se cuela otra fila de encabezado repetida dentro del cuerpo
     if len(df) > 0:
         primera_col = str(df.columns[0]).strip().lower()
         mask_header_repeat = df.iloc[:, 0].astype(str).str.strip().str.lower() == primera_col
@@ -262,12 +241,10 @@ def _leer_excel_robusto(uploaded_file) -> pd.DataFrame:
 
     df = _normalizar_columnas(df)
 
-    # Limpiar filas que no tienen nº aviso real
     df["numero_aviso"] = df["numero_aviso"].apply(_clean_str)
     df = df[df["numero_aviso"] != ""]
     df = df[df["numero_aviso"].str.lower() != "aviso"]
 
-    # Eliminar duplicados dentro del propio Excel
     df = df.drop_duplicates(subset=["numero_aviso"], keep="first")
 
     return df
@@ -276,6 +253,95 @@ def _leer_excel_robusto(uploaded_file) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # IMPORTACIÓN
 # -----------------------------------------------------------------------------
+
+def _importar_una_fila(row) -> str:
+    """
+    Importa una sola fila.
+    Devuelve: "insertado" o "actualizado"
+    Lanza excepción si falla esa fila.
+    """
+    numero_aviso = _clean_str(row.get("numero_aviso"))
+    if not numero_aviso:
+        raise ValueError("Número de aviso vacío.")
+
+    fecha_solicitud = _parse_fecha(row.get("fecha_solicitud"))
+    generador_ot = _clean_str(row.get("generador_ot"))
+    generador_aviso = _clean_str(row.get("generador_aviso"))
+    esm = _clean_str(row.get("esm"))
+    descripcion_ot = _clean_str(row.get("descripcion_ot"))
+    sede = _extraer_sede(esm)
+
+    with ENGINE.begin() as conn:
+        existente = conn.execute(
+            text("SELECT id FROM avisos WHERE numero_aviso = :numero_aviso"),
+            {"numero_aviso": numero_aviso},
+        ).fetchone()
+
+        if existente:
+            conn.execute(
+                text("""
+                    UPDATE avisos
+                    SET
+                        fecha_solicitud = :fecha_solicitud,
+                        generador_ot = :generador_ot,
+                        generador_aviso = :generador_aviso,
+                        esm = :esm,
+                        descripcion_ot = :descripcion_ot,
+                        sede = :sede,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE numero_aviso = :numero_aviso
+                """),
+                {
+                    "numero_aviso": numero_aviso,
+                    "fecha_solicitud": fecha_solicitud,
+                    "generador_ot": generador_ot,
+                    "generador_aviso": generador_aviso,
+                    "esm": esm,
+                    "descripcion_ot": descripcion_ot,
+                    "sede": sede,
+                },
+            )
+            return "actualizado"
+
+        conn.execute(
+            text("""
+                INSERT INTO avisos (
+                    numero_aviso,
+                    fecha_solicitud,
+                    generador_ot,
+                    generador_aviso,
+                    esm,
+                    descripcion_ot,
+                    sede,
+                    estado,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    :numero_aviso,
+                    :fecha_solicitud,
+                    :generador_ot,
+                    :generador_aviso,
+                    :esm,
+                    :descripcion_ot,
+                    :sede,
+                    'Pendiente',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                )
+            """),
+            {
+                "numero_aviso": numero_aviso,
+                "fecha_solicitud": fecha_solicitud,
+                "generador_ot": generador_ot,
+                "generador_aviso": generador_aviso,
+                "esm": esm,
+                "descripcion_ot": descripcion_ot,
+                "sede": sede,
+            },
+        )
+        return "insertado"
+
 
 def _importar_desde_buffer(uploaded_file) -> dict:
     _ensure_schema()
@@ -288,6 +354,7 @@ def _importar_desde_buffer(uploaded_file) -> dict:
             "actualizados": 0,
             "omitidos": 0,
             "errores": ["El Excel está vacío o no se ha podido interpretar."],
+            "leidos_excel": 0,
         }
 
     insertados = 0
@@ -295,93 +362,19 @@ def _importar_desde_buffer(uploaded_file) -> dict:
     omitidos = 0
     errores: list[str] = []
 
-    with ENGINE.begin() as conn:
-        for idx, row in df.iterrows():
-            try:
-                numero_aviso = _clean_str(row.get("numero_aviso"))
-                if not numero_aviso:
-                    omitidos += 1
-                    continue
-
-                fecha_solicitud = _parse_fecha(row.get("fecha_solicitud"))
-                generador_ot = _clean_str(row.get("generador_ot"))
-                generador_aviso = _clean_str(row.get("generador_aviso"))
-                esm = _clean_str(row.get("esm"))
-                descripcion_ot = _clean_str(row.get("descripcion_ot"))
-                sede = _extraer_sede(esm)
-
-                existente = conn.execute(
-                    text("SELECT id FROM avisos WHERE numero_aviso = :numero_aviso"),
-                    {"numero_aviso": numero_aviso},
-                ).fetchone()
-
-                if existente:
-                    conn.execute(
-                        text("""
-                            UPDATE avisos
-                            SET
-                                fecha_solicitud = :fecha_solicitud,
-                                generador_ot = :generador_ot,
-                                generador_aviso = :generador_aviso,
-                                esm = :esm,
-                                descripcion_ot = :descripcion_ot,
-                                sede = :sede,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE numero_aviso = :numero_aviso
-                        """),
-                        {
-                            "numero_aviso": numero_aviso,
-                            "fecha_solicitud": fecha_solicitud,
-                            "generador_ot": generador_ot,
-                            "generador_aviso": generador_aviso,
-                            "esm": esm,
-                            "descripcion_ot": descripcion_ot,
-                            "sede": sede,
-                        },
-                    )
-                    actualizados += 1
-                else:
-                    conn.execute(
-                        text("""
-                            INSERT INTO avisos (
-                                numero_aviso,
-                                fecha_solicitud,
-                                generador_ot,
-                                generador_aviso,
-                                esm,
-                                descripcion_ot,
-                                sede,
-                                estado,
-                                created_at,
-                                updated_at
-                            )
-                            VALUES (
-                                :numero_aviso,
-                                :fecha_solicitud,
-                                :generador_ot,
-                                :generador_aviso,
-                                :esm,
-                                :descripcion_ot,
-                                :sede,
-                                'Pendiente',
-                                CURRENT_TIMESTAMP,
-                                CURRENT_TIMESTAMP
-                            )
-                        """),
-                        {
-                            "numero_aviso": numero_aviso,
-                            "fecha_solicitud": fecha_solicitud,
-                            "generador_ot": generador_ot,
-                            "generador_aviso": generador_aviso,
-                            "esm": esm,
-                            "descripcion_ot": descripcion_ot,
-                            "sede": sede,
-                        },
-                    )
-                    insertados += 1
-
-            except Exception as e:
-                errores.append(f"Fila Excel {idx + 1}: {str(e)}")
+    for idx, row in df.iterrows():
+        try:
+            resultado = _importar_una_fila(row)
+            if resultado == "insertado":
+                insertados += 1
+            elif resultado == "actualizado":
+                actualizados += 1
+            else:
+                omitidos += 1
+        except Exception as e:
+            errores.append(
+                f"Fila Excel {idx + 1} | Aviso {_clean_str(row.get('numero_aviso'))}: {str(e)}"
+            )
 
     return {
         "insertados": insertados,
@@ -498,7 +491,7 @@ def render(user: dict) -> None:
                 preview_df = _leer_excel_robusto(uploaded)
                 st.markdown("**Vista previa interpretada del Excel**")
                 st.write(f"Filas útiles detectadas en el Excel: **{len(preview_df)}**")
-                st.dataframe(preview_df.head(20), use_container_width=True)
+                st.dataframe(preview_df, use_container_width=True, height=500)
             except Exception as e:
                 st.error(f"No se pudo interpretar el Excel: {e}")
 
@@ -515,7 +508,7 @@ def render(user: dict) -> None:
                 )
 
                 if resultado["errores"]:
-                    with st.expander(f"Ver errores ({len(resultado['errores'])})"):
+                    with st.expander(f"Ver errores ({len(resultado['errores'])})", expanded=True):
                         for err in resultado["errores"]:
                             st.write(f"- {err}")
 
@@ -529,7 +522,8 @@ def render(user: dict) -> None:
 
         try:
             df_export = _leer_avisos_df()
-            st.dataframe(df_export.head(25), use_container_width=True)
+            st.write(f"Total avisos en base de datos: **{len(df_export)}**")
+            st.dataframe(df_export, use_container_width=True, height=500)
 
             excel_bytes = _to_excel_bytes(df_export)
             st.download_button(
