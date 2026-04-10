@@ -4,29 +4,26 @@ Página de Administración
 - Exportar avisos a Excel
 - Ver resumen rápido
 
+Versión robusta para Excel reales con encabezados raros / filas vacías.
 Compatible con PostgreSQL/Supabase vía SQLAlchemy.
-No usa conn.cursor().
 """
 
 from __future__ import annotations
 
 from io import BytesIO
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text, inspect, create_engine
+
 
 # -----------------------------------------------------------------------------
 # ENGINE
 # -----------------------------------------------------------------------------
 
 def _get_engine():
-    """
-    Intenta reutilizar el engine principal del proyecto.
-    Si no puede, crea uno desde DATABASE_URL o SQLite local como último recurso.
-    """
     try:
         from database import db as db_module
 
@@ -62,10 +59,6 @@ ENGINE = _get_engine()
 # -----------------------------------------------------------------------------
 
 def _ensure_schema() -> None:
-    """
-    Crea la tabla de avisos si no existe.
-    No rompe si ya existe.
-    """
     inspector = inspect(ENGINE)
     if inspector.has_table("avisos"):
         return
@@ -82,10 +75,13 @@ def _ensure_schema() -> None:
         sede TEXT NULL,
         estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente',
         coordinador VARCHAR(100) NULL,
+        coordinador_id INTEGER NULL,
         comentarios TEXT NULL,
         enlace_drive TEXT NULL,
         material_faltante TEXT NULL,
         fecha_cierre TIMESTAMP NULL,
+        alerta_1mes_enviada BOOLEAN NOT NULL DEFAULT FALSE,
+        alerta_3meses_enviada BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -101,13 +97,25 @@ def _ensure_schema() -> None:
 def _clean_str(value) -> str:
     if value is None:
         return ""
-    if pd.isna(value):
-        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
     return str(value).strip()
 
 
 def _parse_fecha(value) -> Optional[date]:
-    if value is None or pd.isna(value) or str(value).strip() == "":
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    s = str(value).strip()
+    if not s:
         return None
 
     if isinstance(value, date) and not isinstance(value, datetime):
@@ -116,43 +124,64 @@ def _parse_fecha(value) -> Optional[date]:
     if isinstance(value, datetime):
         return value.date()
 
-    try:
-        parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
-        if pd.isna(parsed):
-            return None
-        return parsed.date()
-    except Exception:
+    parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
+    if pd.isna(parsed):
         return None
+    return parsed.date()
 
 
 def _extraer_sede(esm: str) -> str:
-    """
-    Intenta sacar la sede desde el texto E.S.M.
-    Si no puede, deja el mismo valor.
-    """
     esm = _clean_str(esm)
     if not esm:
         return ""
 
-    # Ejemplo habitual:
-    # JUSTICIA.AL.AL03.860-GENERICO OBRA CIVIL AGUILERA 53
     if "-" in esm:
         parte = esm.split("-")[-1].strip()
-        return parte
+        if parte:
+            return parte
 
     return esm
 
 
+def _looks_like_header_row(values: List[Any]) -> bool:
+    """
+    Detecta si una fila parece la fila de encabezados.
+    """
+    txt = " | ".join([_clean_str(v).lower() for v in values if _clean_str(v)])
+    pistas = [
+        "aviso",
+        "fecha",
+        "solicitud",
+        "generador",
+        "ot",
+        "e.s.m",
+        "esm",
+        "descripción",
+        "descripcion",
+    ]
+    hits = sum(1 for p in pistas if p in txt)
+    return hits >= 3
+
+
+def _find_header_row(df_raw: pd.DataFrame) -> int:
+    """
+    Busca la fila de encabezado dentro de las primeras filas.
+    """
+    max_scan = min(len(df_raw), 15)
+    for i in range(max_scan):
+        fila = df_raw.iloc[i].tolist()
+        if _looks_like_header_row(fila):
+            return i
+    return 0
+
+
 def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Acepta nombres variados y los traduce a columnas internas estándar.
-    """
     mapping = {}
 
     for col in df.columns:
         c = str(col).strip().lower()
 
-        if c in ["aviso", "nº aviso", "n° aviso", "numero aviso", "número aviso", "num aviso"]:
+        if c in ["aviso", "nº", "nº aviso", "n° aviso", "numero aviso", "número aviso", "num aviso"]:
             mapping[col] = "numero_aviso"
         elif c in ["fecha de solicitud", "fecha solicitud", "fecha"]:
             mapping[col] = "fecha_solicitud"
@@ -160,15 +189,15 @@ def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
             mapping[col] = "generador_ot"
         elif c in ["generador aviso", "generador de aviso"]:
             mapping[col] = "generador_aviso"
-        elif c in ["e.s.m.", "esm", "e.s.m"]:
+        elif c in ["e.s.m.", "e.s.m", "esm"]:
             mapping[col] = "esm"
         elif c in ["descripción de la ot", "descripcion de la ot", "descripcion ot", "descripción ot"]:
             mapping[col] = "descripcion_ot"
 
     df = df.rename(columns=mapping)
 
-    # Si el Excel viene exactamente por posición y no por nombre, intenta rescatarlo
     cols = list(df.columns)
+
     if "numero_aviso" not in df.columns and len(cols) >= 1:
         df = df.rename(columns={cols[0]: "numero_aviso"})
         cols = list(df.columns)
@@ -190,17 +219,58 @@ def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     required = ["numero_aviso", "fecha_solicitud", "generador_ot", "generador_aviso", "esm", "descripcion_ot"]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(
-            f"Faltan columnas obligatorias en el Excel: {', '.join(missing)}"
-        )
+        raise ValueError(f"Faltan columnas obligatorias en el Excel: {', '.join(missing)}")
 
     return df
 
 
-def _table_has_column(table_name: str, column_name: str) -> bool:
-    inspector = inspect(ENGINE)
-    cols = inspector.get_columns(table_name)
-    return any(c["name"] == column_name for c in cols)
+def _leer_excel_robusto(uploaded_file) -> pd.DataFrame:
+    """
+    Lee el Excel de forma robusta:
+    1) carga sin encabezado
+    2) detecta la fila real de encabezados
+    3) limpia filas vacías
+    """
+    contenido = BytesIO(uploaded_file.getvalue())
+
+    # Leer sin asumir encabezado
+    df_raw = pd.read_excel(contenido, header=None)
+
+    if df_raw.empty:
+        return df_raw
+
+    header_row = _find_header_row(df_raw)
+
+    # Volver a leer usando la fila detectada como header
+    contenido.seek(0)
+    df = pd.read_excel(contenido, header=header_row)
+
+    # Eliminar columnas totalmente vacías
+    df = df.dropna(axis=1, how="all")
+
+    # Eliminar filas totalmente vacías
+    df = df.dropna(axis=0, how="all")
+
+    # Limpiar nombres de columna
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # A veces se cuela otra fila de encabezado repetida dentro del cuerpo
+    if len(df) > 0:
+        primera_col = str(df.columns[0]).strip().lower()
+        mask_header_repeat = df.iloc[:, 0].astype(str).str.strip().str.lower() == primera_col
+        df = df[~mask_header_repeat]
+
+    df = _normalizar_columnas(df)
+
+    # Limpiar filas que no tienen nº aviso real
+    df["numero_aviso"] = df["numero_aviso"].apply(_clean_str)
+    df = df[df["numero_aviso"] != ""]
+    df = df[df["numero_aviso"].str.lower() != "aviso"]
+
+    # Eliminar duplicados dentro del propio Excel
+    df = df.drop_duplicates(subset=["numero_aviso"], keep="first")
+
+    return df
 
 
 # -----------------------------------------------------------------------------
@@ -208,25 +278,17 @@ def _table_has_column(table_name: str, column_name: str) -> bool:
 # -----------------------------------------------------------------------------
 
 def _importar_desde_buffer(uploaded_file) -> dict:
-    """
-    Importa avisos desde un Excel subido a Streamlit.
-    No usa cursor(); trabaja con SQLAlchemy.
-    """
     _ensure_schema()
 
-    contenido = BytesIO(uploaded_file.getvalue())
-    df = pd.read_excel(contenido)
+    df = _leer_excel_robusto(uploaded_file)
 
     if df.empty:
         return {
             "insertados": 0,
             "actualizados": 0,
             "omitidos": 0,
-            "errores": ["El Excel está vacío."],
+            "errores": ["El Excel está vacío o no se ha podido interpretar."],
         }
-
-    df = _normalizar_columnas(df)
-    df = df.dropna(how="all")
 
     insertados = 0
     actualizados = 0
@@ -319,18 +381,19 @@ def _importar_desde_buffer(uploaded_file) -> dict:
                     insertados += 1
 
             except Exception as e:
-                errores.append(f"Fila {idx + 2}: {str(e)}")
+                errores.append(f"Fila Excel {idx + 1}: {str(e)}")
 
     return {
         "insertados": insertados,
         "actualizados": actualizados,
         "omitidos": omitidos,
         "errores": errores,
+        "leidos_excel": len(df),
     }
 
 
 # -----------------------------------------------------------------------------
-# EXPORTACIÓN
+# EXPORTACIÓN / RESUMEN
 # -----------------------------------------------------------------------------
 
 def _leer_avisos_df() -> pd.DataFrame:
@@ -419,8 +482,8 @@ def render(user: dict) -> None:
     with tab1:
         st.subheader("Importar avisos desde Excel")
         st.write(
-            "Sube el Excel original con las columnas del aviso. "
-            "Si un aviso ya existe, se actualizan sus datos base sin borrar el resto del seguimiento."
+            "Sube el Excel original con los avisos. "
+            "Si un aviso ya existe, se actualiza sin perder el seguimiento."
         )
 
         uploaded = st.file_uploader(
@@ -432,11 +495,12 @@ def render(user: dict) -> None:
 
         if uploaded is not None:
             try:
-                preview_df = pd.read_excel(BytesIO(uploaded.getvalue()))
-                st.markdown("**Vista previa**")
-                st.dataframe(preview_df.head(10), use_container_width=True)
+                preview_df = _leer_excel_robusto(uploaded)
+                st.markdown("**Vista previa interpretada del Excel**")
+                st.write(f"Filas útiles detectadas en el Excel: **{len(preview_df)}**")
+                st.dataframe(preview_df.head(20), use_container_width=True)
             except Exception as e:
-                st.error(f"No se pudo leer el Excel: {e}")
+                st.error(f"No se pudo interpretar el Excel: {e}")
 
         if uploaded is not None and st.button("✅ Importar todos los avisos", type="primary"):
             try:
@@ -444,6 +508,7 @@ def render(user: dict) -> None:
 
                 st.success(
                     f"Importación terminada. "
+                    f"Leídos en Excel: {resultado.get('leidos_excel', 0)} | "
                     f"Insertados: {resultado['insertados']} | "
                     f"Actualizados: {resultado['actualizados']} | "
                     f"Omitidos: {resultado['omitidos']}"
@@ -503,6 +568,7 @@ def render(user: dict) -> None:
                 )
                 df = df[mask]
 
+            st.write(f"Total avisos visibles en administración: **{len(df)}**")
             st.dataframe(df, use_container_width=True, height=500)
 
         except Exception as e:
