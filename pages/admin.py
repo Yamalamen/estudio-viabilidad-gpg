@@ -4,8 +4,11 @@ Página de Administración
 - Exportar avisos a Excel
 - Ver resumen rápido
 
-Versión robusta para Excel reales y PostgreSQL/Supabase.
-IMPORTANTE: importa fila por fila para que un error en una fila no bloquee las demás.
+Versión de IMPORTACIÓN TOTAL:
+- Lee el Excel de forma robusta
+- Permite vaciar la tabla y reimportar desde cero
+- Inserta fila a fila
+- Verifica cuántos registros quedan realmente en la BD
 """
 
 from __future__ import annotations
@@ -40,7 +43,12 @@ def _get_engine():
     except Exception:
         pass
 
-    database_url = st.secrets.get("DATABASE_URL", None)
+    database_url = None
+    try:
+        database_url = st.secrets.get("DATABASE_URL", None)
+    except Exception:
+        pass
+
     if not database_url:
         import os
         database_url = os.getenv("DATABASE_URL")
@@ -67,11 +75,13 @@ def _ensure_schema() -> None:
     CREATE TABLE IF NOT EXISTS avisos (
         id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         numero_aviso VARCHAR(100) UNIQUE NOT NULL,
+        num_aviso VARCHAR(100),
         fecha_solicitud DATE NULL,
         generador_ot TEXT NULL,
         generador_aviso TEXT NULL,
         esm TEXT NULL,
         descripcion_ot TEXT NULL,
+        descripcion TEXT NULL,
         sede TEXT NULL,
         estado VARCHAR(50) NOT NULL DEFAULT 'Pendiente',
         coordinador VARCHAR(100) NULL,
@@ -79,6 +89,7 @@ def _ensure_schema() -> None:
         comentarios TEXT NULL,
         enlace_drive TEXT NULL,
         material_faltante TEXT NULL,
+        material_necesario TEXT NULL,
         fecha_cierre TIMESTAMP NULL,
         alerta_1mes_enviada BOOLEAN NOT NULL DEFAULT FALSE,
         alerta_3meses_enviada BOOLEAN NOT NULL DEFAULT FALSE,
@@ -88,6 +99,18 @@ def _ensure_schema() -> None:
     """
     with ENGINE.begin() as conn:
         conn.execute(text(ddl))
+
+
+def _count_avisos() -> int:
+    _ensure_schema()
+    with ENGINE.begin() as conn:
+        return int(conn.execute(text("SELECT COUNT(*) FROM avisos")).scalar() or 0)
+
+
+def _vaciar_tabla_avisos() -> None:
+    _ensure_schema()
+    with ENGINE.begin() as conn:
+        conn.execute(text("DELETE FROM avisos"))
 
 
 # -----------------------------------------------------------------------------
@@ -254,12 +277,7 @@ def _leer_excel_robusto(uploaded_file) -> pd.DataFrame:
 # IMPORTACIÓN
 # -----------------------------------------------------------------------------
 
-def _importar_una_fila(row) -> str:
-    """
-    Importa una sola fila.
-    Devuelve: "insertado" o "actualizado"
-    Lanza excepción si falla esa fila.
-    """
+def _insertar_fila(row) -> None:
     numero_aviso = _clean_str(row.get("numero_aviso"))
     if not numero_aviso:
         raise ValueError("Número de aviso vacío.")
@@ -272,46 +290,17 @@ def _importar_una_fila(row) -> str:
     sede = _extraer_sede(esm)
 
     with ENGINE.begin() as conn:
-        existente = conn.execute(
-            text("SELECT id FROM avisos WHERE numero_aviso = :numero_aviso"),
-            {"numero_aviso": numero_aviso},
-        ).fetchone()
-
-        if existente:
-            conn.execute(
-                text("""
-                    UPDATE avisos
-                    SET
-                        fecha_solicitud = :fecha_solicitud,
-                        generador_ot = :generador_ot,
-                        generador_aviso = :generador_aviso,
-                        esm = :esm,
-                        descripcion_ot = :descripcion_ot,
-                        sede = :sede,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE numero_aviso = :numero_aviso
-                """),
-                {
-                    "numero_aviso": numero_aviso,
-                    "fecha_solicitud": fecha_solicitud,
-                    "generador_ot": generador_ot,
-                    "generador_aviso": generador_aviso,
-                    "esm": esm,
-                    "descripcion_ot": descripcion_ot,
-                    "sede": sede,
-                },
-            )
-            return "actualizado"
-
         conn.execute(
             text("""
                 INSERT INTO avisos (
                     numero_aviso,
+                    num_aviso,
                     fecha_solicitud,
                     generador_ot,
                     generador_aviso,
                     esm,
                     descripcion_ot,
+                    descripcion,
                     sede,
                     estado,
                     created_at,
@@ -319,11 +308,13 @@ def _importar_una_fila(row) -> str:
                 )
                 VALUES (
                     :numero_aviso,
+                    :num_aviso,
                     :fecha_solicitud,
                     :generador_ot,
                     :generador_aviso,
                     :esm,
                     :descripcion_ot,
+                    :descripcion,
                     :sede,
                     'Pendiente',
                     CURRENT_TIMESTAMP,
@@ -332,56 +323,50 @@ def _importar_una_fila(row) -> str:
             """),
             {
                 "numero_aviso": numero_aviso,
+                "num_aviso": numero_aviso,
                 "fecha_solicitud": fecha_solicitud,
                 "generador_ot": generador_ot,
                 "generador_aviso": generador_aviso,
                 "esm": esm,
                 "descripcion_ot": descripcion_ot,
+                "descripcion": descripcion_ot,
                 "sede": sede,
             },
         )
-        return "insertado"
 
 
-def _importar_desde_buffer(uploaded_file) -> dict:
+def _reimportar_desde_cero(uploaded_file) -> dict:
     _ensure_schema()
 
     df = _leer_excel_robusto(uploaded_file)
 
     if df.empty:
         return {
-            "insertados": 0,
-            "actualizados": 0,
-            "omitidos": 0,
-            "errores": ["El Excel está vacío o no se ha podido interpretar."],
             "leidos_excel": 0,
+            "insertados": 0,
+            "errores": ["El Excel está vacío o no se ha podido interpretar."],
+            "total_bd": _count_avisos(),
         }
 
+    _vaciar_tabla_avisos()
+
     insertados = 0
-    actualizados = 0
-    omitidos = 0
-    errores: list[str] = []
+    errores = []
 
     for idx, row in df.iterrows():
         try:
-            resultado = _importar_una_fila(row)
-            if resultado == "insertado":
-                insertados += 1
-            elif resultado == "actualizado":
-                actualizados += 1
-            else:
-                omitidos += 1
+            _insertar_fila(row)
+            insertados += 1
         except Exception as e:
-            errores.append(
-                f"Fila Excel {idx + 1} | Aviso {_clean_str(row.get('numero_aviso'))}: {str(e)}"
-            )
+            errores.append(f"Fila {idx + 1} | Aviso {_clean_str(row.get('numero_aviso'))}: {str(e)}")
+
+    total_bd = _count_avisos()
 
     return {
-        "insertados": insertados,
-        "actualizados": actualizados,
-        "omitidos": omitidos,
-        "errores": errores,
         "leidos_excel": len(df),
+        "insertados": insertados,
+        "errores": errores,
+        "total_bd": total_bd,
     }
 
 
@@ -394,26 +379,25 @@ def _leer_avisos_df() -> pd.DataFrame:
 
     query = """
         SELECT
-            numero_aviso AS "Aviso",
+            COALESCE(CAST(numero_aviso AS TEXT), CAST(num_aviso AS TEXT)) AS "Aviso",
             fecha_solicitud AS "Fecha de solicitud",
             generador_ot AS "Generador OT",
             generador_aviso AS "Generador Aviso",
             esm AS "E.S.M.",
-            descripcion_ot AS "Descripción de la OT",
+            COALESCE(descripcion_ot, descripcion) AS "Descripción de la OT",
             sede AS "Sede",
-            estado AS "Estado",
+            COALESCE(estado, 'Pendiente') AS "Estado",
             coordinador AS "Coordinador",
             comentarios AS "Comentarios",
             enlace_drive AS "Enlace Drive",
-            material_faltante AS "Material faltante",
+            COALESCE(material_faltante, material_necesario) AS "Material faltante",
             fecha_cierre AS "Fecha cierre",
             created_at AS "Creado",
             updated_at AS "Actualizado"
         FROM avisos
         ORDER BY
-            CASE WHEN fecha_solicitud IS NULL THEN 1 ELSE 0 END,
-            fecha_solicitud DESC,
-            numero_aviso DESC
+            fecha_solicitud DESC NULLS LAST,
+            COALESCE(CAST(numero_aviso AS TEXT), CAST(num_aviso AS TEXT)) DESC
     """
     return pd.read_sql(text(query), ENGINE)
 
@@ -473,38 +457,33 @@ def render(user: dict) -> None:
     tab1, tab2, tab3 = st.tabs(["📥 Importar Excel", "📤 Exportar Excel", "🔎 Vista rápida"])
 
     with tab1:
-        st.subheader("Importar avisos desde Excel")
-        st.write(
-            "Sube el Excel original con los avisos. "
-            "Si un aviso ya existe, se actualiza sin perder el seguimiento."
-        )
+        st.subheader("Reimportar Excel desde cero")
+        st.warning("Esta acción vacía la tabla de avisos y vuelve a cargar todo el Excel desde cero.")
 
         uploaded = st.file_uploader(
             "Selecciona el Excel",
             type=["xlsx", "xls"],
             accept_multiple_files=False,
-            key="excel_import_admin",
+            key="excel_import_admin_total",
         )
 
         if uploaded is not None:
             try:
                 preview_df = _leer_excel_robusto(uploaded)
-                st.markdown("**Vista previa interpretada del Excel**")
                 st.write(f"Filas útiles detectadas en el Excel: **{len(preview_df)}**")
                 st.dataframe(preview_df, use_container_width=True, height=500)
             except Exception as e:
                 st.error(f"No se pudo interpretar el Excel: {e}")
 
-        if uploaded is not None and st.button("✅ Importar todos los avisos", type="primary"):
+        if uploaded is not None and st.button("🚨 VACIAR TABLA E IMPORTAR TODO", type="primary"):
             try:
-                resultado = _importar_desde_buffer(uploaded)
+                resultado = _reimportar_desde_cero(uploaded)
 
                 st.success(
-                    f"Importación terminada. "
-                    f"Leídos en Excel: {resultado.get('leidos_excel', 0)} | "
+                    f"Reimportación terminada. "
+                    f"Leídos en Excel: {resultado['leidos_excel']} | "
                     f"Insertados: {resultado['insertados']} | "
-                    f"Actualizados: {resultado['actualizados']} | "
-                    f"Omitidos: {resultado['omitidos']}"
+                    f"Total real en BD: {resultado['total_bd']}"
                 )
 
                 if resultado["errores"]:
@@ -515,11 +494,10 @@ def render(user: dict) -> None:
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Error al importar: {e}")
+                st.error(f"Error al reimportar: {e}")
 
     with tab2:
         st.subheader("Exportar avisos a Excel")
-
         try:
             df_export = _leer_avisos_df()
             st.write(f"Total avisos en base de datos: **{len(df_export)}**")
@@ -540,30 +518,7 @@ def render(user: dict) -> None:
         st.subheader("Vista rápida")
         try:
             df = _leer_avisos_df()
-
-            filtro_estado = st.selectbox(
-                "Filtrar por estado",
-                options=["Todos"] + sorted([x for x in df["Estado"].dropna().unique().tolist() if str(x).strip()]),
-                index=0,
-            )
-
-            busqueda = st.text_input("Buscar por Nº de aviso, sede, E.S.M. o descripción")
-
-            if filtro_estado != "Todos":
-                df = df[df["Estado"] == filtro_estado]
-
-            if busqueda.strip():
-                q = busqueda.strip().lower()
-                mask = (
-                    df["Aviso"].astype(str).str.lower().str.contains(q, na=False)
-                    | df["Sede"].astype(str).str.lower().str.contains(q, na=False)
-                    | df["E.S.M."].astype(str).str.lower().str.contains(q, na=False)
-                    | df["Descripción de la OT"].astype(str).str.lower().str.contains(q, na=False)
-                )
-                df = df[mask]
-
             st.write(f"Total avisos visibles en administración: **{len(df)}**")
             st.dataframe(df, use_container_width=True, height=500)
-
         except Exception as e:
             st.error(f"No se pudo cargar la vista rápida: {e}")
