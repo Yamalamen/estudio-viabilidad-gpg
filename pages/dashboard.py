@@ -60,7 +60,7 @@ def _leer_avisos():
     query = """
         SELECT
             id,
-            COALESCE(numero_aviso, num_aviso) AS num_aviso,
+            COALESCE(CAST(numero_aviso AS TEXT), CAST(num_aviso AS TEXT)) AS num_aviso,
             fecha_solicitud,
             generador_ot,
             generador_aviso,
@@ -78,7 +78,7 @@ def _leer_avisos():
         FROM avisos
         ORDER BY
             fecha_solicitud DESC NULLS LAST,
-            COALESCE(numero_aviso, num_aviso) DESC
+            COALESCE(CAST(numero_aviso AS TEXT), CAST(num_aviso AS TEXT)) DESC
     """
 
     with ENGINE.begin() as conn:
