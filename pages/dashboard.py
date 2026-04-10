@@ -1,5 +1,6 @@
 """
 Página principal: Dashboard con métricas, filtros y tabla de avisos.
+Dos pestañas: En curso / Terminados.
 """
 import streamlit as st
 from services.avisos import get_all_avisos, get_stats
@@ -11,27 +12,24 @@ from datetime import datetime
 
 
 def render(user: dict):
-    """
-    user: dict con id, username, nombre, role, email
-    """
     st.markdown(
         "<h1 style='color:#1E3A5F;margin-bottom:0;'>⚙️ Gestión de Avisos de Mantenimiento</h1>"
         "<p style='color:#666;margin-top:4px;'>Sedes Judiciales — Provincia de Alicante</p>",
         unsafe_allow_html=True,
     )
 
-    # ── Métricas ────────────────────────────────────────────────────────────────
+    # ── Métricas ─────────────────────────────────────────────────────────────────
     stats = get_stats()
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📋 Total avisos",       stats["total"])
-    c2.metric("🔵 En proceso",          stats["en_proceso"])
-    c3.metric("🟡 Falta material",      stats["falta_material"])
-    c4.metric("🟢 Acabados",            stats["acabado"])
-    c5.metric("🔴 Urgentes (+3 meses)", stats["urgentes"])
+    c1.metric("📋 Total avisos",        stats["total"])
+    c2.metric("🔵 En proceso",           stats["en_proceso"])
+    c3.metric("🟡 Falta material",       stats["falta_material"])
+    c4.metric("🟢 Acabados",             stats["acabado"])
+    c5.metric("🔴 Urgentes (+3 meses)",  stats["urgentes"])
 
     st.markdown("---")
 
-    # ── Leyenda de colores ───────────────────────────────────────────────────────
+    # ── Leyenda de colores ────────────────────────────────────────────────────────
     with st.expander("🎨 Leyenda de colores", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
         col1.markdown(
@@ -47,11 +45,10 @@ def render(user: dict):
             "<div style='background:#C6EFCE;padding:8px;border-radius:4px;text-align:center;'>"
             "<b>🟢 Verde</b><br>Acabado/Cerrado</div>", unsafe_allow_html=True)
 
-    # ── Sidebar: filtros + notificaciones ───────────────────────────────────────
+    # ── Sidebar: notificaciones + filtros + acciones ──────────────────────────────
     render_notif_badge(user["id"])
     filters = render_filtros(role=user["role"])
 
-    # Botones de acción (sidebar)
     with st.sidebar:
         st.divider()
         if user["role"] == "supervisor":
@@ -69,13 +66,31 @@ def render(user: dict):
             use_container_width=True,
         )
 
-    # ── Tabla ───────────────────────────────────────────────────────────────────
-    avisos = get_all_avisos(filters=filters)
-    st.markdown(f"**{len(avisos)} aviso(s) encontrado(s)**")
+    # ── Obtener avisos y separar ──────────────────────────────────────────────────
+    avisos_todos = get_all_avisos(filters=filters)
+    en_curso     = [a for a in avisos_todos if a["estado"] != "Acabado"]
+    terminados   = [a for a in avisos_todos if a["estado"] == "Acabado"]
 
-    selected = render_tabla(avisos)
+    # ── Pestañas ──────────────────────────────────────────────────────────────────
+    tab_curso, tab_term = st.tabs([
+        f"📋 En curso  ({len(en_curso)})",
+        f"✅ Terminados  ({len(terminados)})",
+    ])
 
-    if selected:
-        st.session_state["aviso_seleccionado_id"] = selected["id"]
-        st.session_state["page"] = "detalle_aviso"
-        st.rerun()
+    with tab_curso:
+        if en_curso:
+            st.caption("Haz clic en un aviso del desplegable y pulsa 'Abrir aviso' para cambiar su estado.")
+        selected = render_tabla(en_curso, key_suffix="curso")
+        if selected:
+            st.session_state["aviso_seleccionado_id"] = selected["id"]
+            st.session_state["page"] = "detalle_aviso"
+            st.rerun()
+
+    with tab_term:
+        if terminados:
+            st.caption("Avisos marcados como Acabado/Cerrado.")
+        selected = render_tabla(terminados, key_suffix="term")
+        if selected:
+            st.session_state["aviso_seleccionado_id"] = selected["id"]
+            st.session_state["page"] = "detalle_aviso"
+            st.rerun()

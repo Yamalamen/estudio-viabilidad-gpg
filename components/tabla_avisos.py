@@ -36,7 +36,7 @@ def _dias_abierto(fecha_str: str) -> int:
         return 0
 
 
-def render_tabla(avisos: list) -> dict | None:
+def render_tabla(avisos: list, key_suffix: str = "") -> dict | None:
     """
     Renderiza la tabla de avisos con color coding.
     Devuelve el aviso seleccionado o None.
@@ -90,13 +90,21 @@ def render_tabla(avisos: list) -> dict | None:
     )
 
     # Selector para abrir el detalle
-    st.markdown("**Selecciona un aviso para ver detalles:**")
-    col1, col2 = st.columns([2, 1])
+    st.markdown("**Selecciona un aviso para ver detalles o cambiar su estado:**")
+    col1, col2 = st.columns([3, 1])
     with col1:
-        opciones = [f"#{av['num_aviso']} — {av.get('sede','?')} — {av.get('estado','?')}" for av in avisos]
-        seleccion = st.selectbox("Aviso", ["— elige uno —"] + opciones, label_visibility="collapsed")
+        opciones = [
+            f"#{av['num_aviso']} — {av.get('sede','?')} — {av.get('estado','?')} — {_dias_abierto(av.get('fecha_solicitud',''))} días"
+            for av in avisos
+        ]
+        seleccion = st.selectbox(
+            "Aviso",
+            ["— elige uno —"] + opciones,
+            label_visibility="collapsed",
+            key=f"sel_aviso_{key_suffix}",
+        )
     with col2:
-        abrir = st.button("📂 Abrir aviso", type="primary", use_container_width=True)
+        abrir = st.button("📂 Abrir", type="primary", use_container_width=True, key=f"btn_abrir_{key_suffix}")
 
     if abrir and seleccion != "— elige uno —":
         idx = opciones.index(seleccion)
