@@ -6,7 +6,7 @@ Punto de entrada principal con autenticación y routing de páginas.
 """
 
 import sys
-import os
+import osh
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -63,7 +63,7 @@ except Exception:
     )
 
 # ── Login ────────────────────────────────────────────────────────────────────
-name, authentication_status, username = authenticator.login(
+authenticator.login(
     location="main",
     fields={
         "Form name": "🔐 Acceso — Mantenimiento Sedes Judiciales",
@@ -72,6 +72,9 @@ name, authentication_status, username = authenticator.login(
         "Login": "Entrar",
     },
 )
+name = st.session_state.get("name")
+authentication_status = st.session_state.get("authentication_status")
+username = st.session_state.get("username")
 
 if authentication_status is False:
     st.error("Usuario o contraseña incorrectos.")
