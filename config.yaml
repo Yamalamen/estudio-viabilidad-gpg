@@ -1,0 +1,38 @@
+credentials:
+  usernames:
+    jaime:
+      email: jaime@local.com
+      name: Jaime
+      password: jaime1234
+    luisreina:
+      email: luisreina@local.com
+      name: Luis Reina
+      password: luis1234
+    gustavo:
+      email: gustavo@local.com
+      name: Gustavo
+      password: gustavo1234
+    fran:
+      email: fran@local.com
+      name: Fran
+      password: fran1234
+    andres:
+      email: andres@local.com
+      name: Andres
+      password: andres1234
+    jonatan:
+      email: jonatan@local.com
+      name: Jonatan
+      password: jonatan1234
+    laura:
+      email: laura@local.com
+      name: Laura
+      password: laura1234
+
+cookie:
+  expiry_days: 30
+  key: avisos_mantenimiento_cookie_key_2026
+  name: avisos_mantenimiento_cookie
+
+preauthorized:
+  emails: []
