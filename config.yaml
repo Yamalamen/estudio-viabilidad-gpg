@@ -7,38 +7,31 @@ credentials:
   usernames:
     jaime:
       email: jaime@local.com
-      first_name: Jaime
-      last_name: Supervisor
+      name: Jaime
       password: jaime1234
     luisreina:
       email: luisreina@local.com
-      first_name: Luis
-      last_name: Reina
+      name: Luis Reina
       password: luis1234
     gustavo:
       email: gustavo@local.com
-      first_name: Gustavo
-      last_name: Supervisor
+      name: Gustavo
       password: gustavo1234
     fran:
       email: fran@local.com
-      first_name: Fran
-      last_name: Coordinador
+      name: Fran
       password: fran1234
     andres:
       email: andres@local.com
-      first_name: Andrés
-      last_name: Coordinador
+      name: Andrés
       password: andres1234
     jonatan:
       email: jonatan@local.com
-      first_name: Jonatan
-      last_name: Coordinador
+      name: Jonatan
       password: jonatan1234
     laura:
       email: laura@local.com
-      first_name: Laura
-      last_name: Coordinadora
+      name: Laura
       password: laura1234
 
 pre-authorized:
