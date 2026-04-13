@@ -3,3 +3,5 @@ pandas
 openpyxl
 xlsxwriter
 reportlab
+supabase>=2.3.0
+bcrypt>=4.0.0
